@@ -2,6 +2,9 @@ import databases
 import dataclasses
 import sqlite3
 import json
+import toml
+import hashlib
+import secrets
 
 from quart import Quart, g, request, abort, make_response
 from quart_schema import validate_request, QuartSchema
@@ -10,15 +13,20 @@ from random import randint
 app = Quart(__name__)
 QuartSchema(app)
 
+app.config.from_file("./etc/wordle.toml", toml.load)
+
+
 @dataclasses.dataclass
 class User:
     username: str
     password: str
 
+
 @dataclasses.dataclass
 class Game:
     secretword: str
     username: str
+
 
 @dataclasses.dataclass
 class GameState:
@@ -28,18 +36,44 @@ class GameState:
     incorrect: int
 
 
+# functions to hash and verify from https://til.simonwillison.net/python/password-hashing-with-pbkdf2
+async def _hash_password(password: str, salt: str = None):
+    if not salt:
+        salt = secrets.token_hex(16)
+
+    pw_hash = hashlib.pbkdf2_hmac(
+        "sha256",
+        password.encode("utf-8"),
+        salt.encode("utf-8"),
+        100000,
+    ).hex()
+
+    return f"{salt}${pw_hash}"
+
+
+async def _verify_password(password: str, hashed_password: str) -> bool:
+    if not hashed_password or hashed_password.count("$") != 1:
+        return False
+
+    salt = hashed_password.split("$")[0]
+    computed_hash = await _hash_password(password, salt)
+    return secrets.compare_digest(hashed_password, computed_hash)
+
+
 async def _get_db():
     db = getattr(g, "_database", None)
     if db is None:
-        db = g._database = databases.Database('sqlite+aiosqlite:///wordle_db')
+        db = g._database = databases.Database(app.config["DATABASES"]["URL"])
         await db.connect()
     return db
 
+
 async def _get_random_word():
-    with open('correct.json') as file:
+    with open("./share/correct.json") as file:
         data = json.load(file)
-        rand_index = randint(0, len(data)-1)
+        rand_index = randint(0, len(data) - 1)
         return data[rand_index]
+
 
 # ---------------------------------------------------------------------------- #
 #                                error handlers                                #
@@ -48,12 +82,14 @@ async def _get_random_word():
 async def bad_request(e):
     return {"error": f"Bad Request: {e.description}"}, 400
 
+
 @app.errorhandler(401)
 async def unauthorized(e):
     response = await make_response({"error": f"Unauthorized: {e.description}"}, 401)
     response.status_code = 401
-    response.headers['WWW-Authenticate'] = 'Basic realm="User Login"'
+    response.headers["WWW-Authenticate"] = 'Basic realm="User Login"'
     return response
+
 
 @app.errorhandler(409)
 async def username_exists(e):
@@ -67,17 +103,20 @@ async def username_exists(e):
 async def hello():
     return "Hello World"
 
+
 # --------------------------------- register --------------------------------- #
 @app.route("/register", methods=["POST"])
 @validate_request(User)
-async def register_user(data): 
+async def register_user(data):
     db = await _get_db()
     user = dataclasses.asdict(data)
-    
+
+    hashed_pw = await _hash_password(user["password"])
+    user["password"] = hashed_pw
     try:
-        id = await db.execute( 
+        id = await db.execute(
             """
-            INSERT INTO user_data(username, password)
+            INSERT INTO users(username, password)
             VALUES(:username, :password)
             """,
             user,
@@ -88,39 +127,49 @@ async def register_user(data):
     # TODO: possibly change location to /games/<username>
     return user, 201, {"Location": f"/users/{user['username']}"}
 
+
 # ---------------------------------- sign in --------------------------------- #
 @app.route("/signin")
 async def signin():
-    
+
     auth = request.authorization
-    
+
     # return bad request if invalid auth header
-    # check if authorization header is present
     if not auth:
         abort(400, "Authorization header is required.")
-    
-    # check if username and password are present
+
+    # check both username and password are present
     if not auth.username or not auth.password:
         abort(400, "Username and password are required.")
-        
+
     db = await _get_db()
-    
-    # 0 if username and password are incorrect, 1 if correct
-    # TODO: if we hash passwords we would need to change this slightly
-    exists = await db.fetch_val(
+
+    # fetch the row for the entered username
+    user_row = await db.fetch_one(
         """
-        SELECT EXISTS(
-            SELECT 1 FROM user_data 
-            WHERE username = :username AND password = :password
-        )
+        SELECT *
+        FROM users
+        WHERE username = :username
         """,
-        auth
+        {"username": auth.username},
     )
-    
-    if exists == 1:
-        return {"authenticated": True, "user": auth.username}, 200
-    else:
-        abort(401, "Username or password is incorrect.")
+
+    # if the username doesn't exist, return unauthorized
+    if not user_row:
+        abort(401, "Username does not exist.")
+
+    # compute the hash of the entered password
+    stored_pw = user_row[1]
+    salt = stored_pw.split("$")[0]
+    computed_hash = await _hash_password(auth.password, salt)
+
+    # if the computed hash doesn't match the stored hash, return unauthorized
+    if not secrets.compare_digest(computed_hash, stored_pw):
+        abort(401, "Incorrect password.")
+
+    # finally, return authenticated = true
+    return {"authenticated": True, "user": auth.username}, 200
+
 
 # -------------------------------- create game ------------------------------- #
 # @app.route("/games/create", methods=["POST"])
@@ -139,12 +188,13 @@ async def signin():
 #             """,
 #             game,
 #         )
-        
+
 #     except sqlite3.IntegrityError as e:
 #         abort(409, e)
 
 #     game["gameid"] = id
 #     return game, 201, dict(game)
+
 
 @app.route("/games/create", methods=["POST"])
 @validate_request(Game)
