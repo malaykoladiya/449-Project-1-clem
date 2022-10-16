@@ -24,8 +24,8 @@ class User:
 
 @dataclasses.dataclass
 class Game:
-    secretword: str
     username: str
+    secretword: str = 'blank'
 
 
 @dataclasses.dataclass
@@ -172,36 +172,14 @@ async def signin():
 
 
 # -------------------------------- create game ------------------------------- #
-# @app.route("/games/create", methods=["POST"])
-# @validate_request(Game)
-# async def create_game(data):
-#     random_word = _get_random_word()
-#     game = dataclasses.asdict(data)
-
-#     db = await _get_db()
-
-#     try:
-#         id = await db.execute(
-#             f"""
-#             INSERT INTO games(secretword, username)
-#             VALUES({random_word}, :username)
-#             """,
-#             game,
-#         )
-
-#     except sqlite3.IntegrityError as e:
-#         abort(409, e)
-
-#     game["gameid"] = id
-#     return game, 201, dict(game)
-
-
 @app.route("/games/create", methods=["POST"])
 @validate_request(Game)
 async def create_game(data):
-    db = await _get_db()
     game = dataclasses.asdict(data)
-    app.logger.debug(game)
+    game["secretword"] = await _get_random_word()
+
+    db = await _get_db()
+
     try:
         id = await db.execute(
             """
