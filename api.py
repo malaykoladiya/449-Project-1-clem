@@ -121,8 +121,8 @@ async def register_user(data):
             """,
             user,
         )
-    except sqlite3.IntegrityError as e:
-        abort(409, e)
+    except sqlite3.IntegrityError:
+        abort(409, "Username already exists!")
 
     # TODO: possibly change location to /games/<username>
     return user, 201, {"Location": f"/users/{user['username']}"}
