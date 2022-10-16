@@ -1,9 +1,11 @@
 import databases
 import dataclasses
 import sqlite3
+import json
 
 from quart import Quart, g, request, abort, make_response
 from quart_schema import validate_request, QuartSchema
+from random import randint
 
 app = Quart(__name__)
 QuartSchema(app)
@@ -13,12 +15,31 @@ class User:
     username: str
     password: str
 
+@dataclasses.dataclass
+class Game:
+    secretword: str
+    username: str
+
+@dataclasses.dataclass
+class GameState:
+    gameid: int
+    guesses: int
+    correct: int
+    incorrect: int
+
+
 async def _get_db():
     db = getattr(g, "_database", None)
     if db is None:
         db = g._database = databases.Database('sqlite+aiosqlite:///wordle_db')
         await db.connect()
     return db
+
+async def _get_random_word():
+    with open('correct.json') as file:
+        data = json.load(file)
+        rand_index = randint(0, len(data)-1)
+        return data[rand_index]
 
 # ---------------------------------------------------------------------------- #
 #                                error handlers                                #
@@ -52,8 +73,6 @@ async def hello():
 async def register_user(data): 
     db = await _get_db()
     user = dataclasses.asdict(data)
-
-    
     
     try:
         id = await db.execute( 
@@ -103,3 +122,46 @@ async def signin():
     else:
         abort(401, "Username or password is incorrect.")
 
+# -------------------------------- create game ------------------------------- #
+# @app.route("/games/create", methods=["POST"])
+# @validate_request(Game)
+# async def create_game(data):
+#     random_word = _get_random_word()
+#     game = dataclasses.asdict(data)
+
+#     db = await _get_db()
+
+#     try:
+#         id = await db.execute(
+#             f"""
+#             INSERT INTO games(secretword, username)
+#             VALUES({random_word}, :username)
+#             """,
+#             game,
+#         )
+        
+#     except sqlite3.IntegrityError as e:
+#         abort(409, e)
+
+#     game["gameid"] = id
+#     return game, 201, dict(game)
+
+@app.route("/games/create", methods=["POST"])
+@validate_request(Game)
+async def create_game(data):
+    db = await _get_db()
+    game = dataclasses.asdict(data)
+    app.logger.debug(game)
+    try:
+        id = await db.execute(
+            """
+            INSERT INTO games(secretword, username)
+            VALUES(:secretword, :username)
+            """,
+            game,
+        )
+    except sqlite3.IntegrityError as e:
+        abort(409, e)
+
+    game["gameid"] = id
+    return game, 201, dict(game)
