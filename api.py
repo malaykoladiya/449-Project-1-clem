@@ -180,6 +180,7 @@ async def create_game(data):
 
     db = await _get_db()
 
+    # create new row in game
     try:
         id = await db.execute(
             """
@@ -192,4 +193,18 @@ async def create_game(data):
         abort(409, e)
 
     game["gameid"] = id
-    return game, 201, dict(game)
+
+    game_state = {"gameid" : game["gameid"], "guesses" : 0, "correct" : 0, "incorrect" : 0}
+    # create new row in game_states
+    try:
+        id = await db.execute(
+            """
+            INSERT INTO game_states(gameid, guesses, correct, incorrect)
+            VALUES(:gameid, :guesses, :correct, :incorrect)
+            """,
+            game_state,
+        )
+    except sqlite3.IntegrityError as e:
+        abort(409, e)
+
+    return game_state, 201, dict(game_state)
