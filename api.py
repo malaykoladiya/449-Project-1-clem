@@ -1,8 +1,8 @@
-from click import get_binary_stream
 import databases
 import dataclasses
 import sqlite3
-from quart import Quart, g, request, redirect, url_for, abort
+
+from quart import Quart, g, request, abort, make_response
 from quart_schema import validate_request, QuartSchema
 
 app = Quart(__name__)
@@ -13,7 +13,6 @@ class User:
     username: str
     password: str
 
-
 async def _get_db():
     db = getattr(g, "_database", None)
     if db is None:
@@ -21,16 +20,41 @@ async def _get_db():
         await db.connect()
     return db
 
+# ---------------------------------------------------------------------------- #
+#                                error handlers                                #
+# ---------------------------------------------------------------------------- #
+@app.errorhandler(400)
+async def bad_request(e):
+    return {"error": f"Bad Request: {e.description}"}, 400
+
+@app.errorhandler(401)
+async def unauthorized(e):
+    response = await make_response({"error": f"Unauthorized: {e.description}"}, 401)
+    response.status_code = 401
+    response.headers['WWW-Authenticate'] = 'Basic realm="User Login"'
+    return response
+
+@app.errorhandler(409)
+async def username_exists(e):
+    return {"error": "Username already exists"}, 409
+
+
+# ---------------------------------------------------------------------------- #
+#                                  api routes                                  #
+# ---------------------------------------------------------------------------- #
 @app.route("/")
 async def hello():
     return "Hello World"
 
-@app.route("/register/", methods=["POST"])
+# --------------------------------- register --------------------------------- #
+@app.route("/register", methods=["POST"])
 @validate_request(User)
-async def register_user(data):
+async def register_user(data): 
     db = await _get_db()
     user = dataclasses.asdict(data)
-    print(user)
+
+    
+    
     try:
         id = await db.execute( 
             """
@@ -42,6 +66,40 @@ async def register_user(data):
     except sqlite3.IntegrityError as e:
         abort(409, e)
 
-    user["id"] = id
-    return user, 201, {"Location": f"/register/{id}"}
+    # TODO: possibly change location to /games/<username>
+    return user, 201, {"Location": f"/users/{user['username']}"}
+
+# ---------------------------------- sign in --------------------------------- #
+@app.route("/signin")
+async def signin():
+    
+    auth = request.authorization
+    
+    # return bad request if invalid auth header
+    # check if authorization header is present
+    if not auth:
+        abort(400, "Authorization header is required.")
+    
+    # check if username and password are present
+    if not auth.username or not auth.password:
+        abort(400, "Username and password are required.")
+        
+    db = await _get_db()
+    
+    # 0 if username and password are incorrect, 1 if correct
+    # TODO: if we hash passwords we would need to change this slightly
+    exists = await db.fetch_val(
+        """
+        SELECT EXISTS(
+            SELECT 1 FROM user_data 
+            WHERE username = :username AND password = :password
+        )
+        """,
+        auth
+    )
+    
+    if exists == 1:
+        return {"authenticated": True, "user": auth.username}, 200
+    else:
+        abort(401, "Username or password is incorrect.")
 
