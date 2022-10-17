@@ -208,3 +208,16 @@ async def create_game(data):
         abort(409, e)
 
     return game_state, 201, dict(game_state)
+
+# ---------------------------- retrieve game state --------------------------- #
+@app.route("/games/game/<int:gameid>", methods=["GET"])
+async def get_game_state(gameid):
+    db = await _get_db()
+    game_state = await db.fetch_one(
+        "SELECT * FROM game_states WHERE gameid = :gameid", 
+        values={"gameid": gameid}
+        )
+    if game_state:
+        return dict(game_state)
+    else:
+        abort(404)
