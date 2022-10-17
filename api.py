@@ -74,6 +74,14 @@ async def _get_random_word():
         rand_index = randint(0, len(data) - 1)
         return data[rand_index]
 
+async def check_string(string: str, word: str):
+    correct = 0
+    for i in string:
+        if(i.find(word)):
+            correct += 1
+    return correct
+
+
 
 # ---------------------------------------------------------------------------- #
 #                                error handlers                                #
@@ -194,7 +202,7 @@ async def create_game(data):
 
     game["gameid"] = id
 
-    game_state = {"gameid" : game["gameid"], "guesses" : 0, "correct" : 0, "incorrect" : 0}
+    game_state = {"gameid" : game["gameid"], "guesses" : 6, "correct" : 0, "incorrect" : 0}
     # create new row in game_states
     try:
         id = await db.execute(
@@ -221,3 +229,41 @@ async def get_game_state(gameid):
         return dict(game_state)
     else:
         abort(404)
+
+#--- make a guess / update game state ---#
+@app.route("/games/game/<int:gameid>", methods=["POST"])
+async def check_guess(gameid):
+    gamestate = await get_game_state(gameid)
+    guess = await request.get_json()
+    db = await _get_db()
+    secretword = await db.fetch_one("SELECT secretword FROM games WHERE gameid = :gameid", values={"gameid": gameid})
+
+    gamestate['guesses'] -= 1
+    if guess['guess'] == secretword[0]:
+        try:
+            # Temp code just to make sure this works, but gamestate would call get game state function and decrement/increment as necessary
+            # then would update table with new values rather than inserting anything
+            gamestate['correct'] += len(secretword[0])
+            id = await db.execute (
+                """
+                UPDATE game_states SET guesses = :guesses, correct = :correct, incorrect = :incorrect WHERE gameid = :gameid
+                """,
+                gamestate,
+            )
+        except sqlite3.IntegrityError as e:
+            abort(400, e)
+        return gamestate, 201, dict(gamestate)
+    else:
+        gamestate['correct'] += await check_string(guess['guess'], secretword[0])
+        gamestate['incorrect'] += abs(len(secretword[0]) - gamestate['correct'])
+        try:
+            id = await db.execute (
+                """
+                UPDATE game_states SET guesses = :guesses, correct = :correct, incorrect = :incorrect WHERE gameid = :gameid
+                """,
+                gamestate,
+            )
+        except sqlite3.IntegrityError as e:
+            abort(400, e)
+        return gamestate, 201, dict(gamestate)
+    
