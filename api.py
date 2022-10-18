@@ -242,7 +242,8 @@ async def check_guess(gameid):
     guess = await request.get_json()
     db = await _get_db()
     secretword = await db.fetch_one("SELECT secretword FROM games WHERE gameid = :gameid", values={"gameid": gameid})
-
+    print("guess",guess)
+    print("secretword",secretword[0])
     if gamestate['guesses'] > 0:
         gamestate['guesses'] -= 1
         if guess['guess'] == secretword[0]:
@@ -274,3 +275,17 @@ async def check_guess(gameid):
             return gamestate, 201, dict(gamestate)
     else:
         return {"Error": "Out of guesses!"}
+#-----------------------------------Listing in progress games------------------------#
+@app.route("/users/<string:username>",methods=["GET"])      
+async def get_progress_game(username):
+    db=await _get_db()
+    progress_game= await db.fetch_all(
+        "SELECT games.gameid,username FROM games LEFT JOIN game_states ON games.gameid = game_states.gameid  WHERE username = :username AND game_states.guesses != 0",
+        values={"username":username}
+        )
+    
+    if progress_game:
+        print("Progress of game:",progress_game)
+        return list(map(dict, progress_game))
+    else:
+        abort(404)
