@@ -25,11 +25,13 @@ CREATE TABLE game_states (
     guesses TINYINT NOT NULL,
     correct TEXT NOT NULL,
     incorrect TEXT NOT NULL,
+    completed BOOLEAN NOT NULL,
     FOREIGN KEY (gameid) REFERENCES games(gameid)
 );
 
 CREATE TABLE valid_words (
     word TEXT NOT NULL,
+    correct_word BOOLEAN NOT NULL,
     PRIMARY KEY(word)
 );
 

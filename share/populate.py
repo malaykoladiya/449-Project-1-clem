@@ -8,9 +8,19 @@ def insert_valid_words(cursor: sqlite3.Cursor) -> int:
         words = json.load(f)
 
     for word in words:
-        cursor.execute("INSERT INTO valid_words (word) VALUES (?)", (word,))
+        cursor.execute(
+            "INSERT INTO valid_words (word, correct_word) VALUES (?, 0)", (word,)
+        )
 
-    return len(words)
+    with open("./share/correct.json") as f:
+        correct_words = json.load(f)
+
+    for word in correct_words:
+        cursor.execute(
+            "INSERT INTO valid_words (word, correct_word) VALUES (?, 1)", (word,)
+        )
+
+    return len(words) + len(correct_words)
 
 
 if __name__ == "__main__":
