@@ -9,12 +9,17 @@ import secrets
 from quart import Quart, g, request, abort, make_response
 from quart_schema import validate_request, QuartSchema
 from random import randint
-from typing import List
+from typing import List, Tuple
 
 app = Quart(__name__)
 QuartSchema(app)
 
 app.config.from_file("./etc/wordle.toml", toml.load)
+
+
+@dataclasses.dataclass
+class Guess:
+    guess: str
 
 
 @dataclasses.dataclass
@@ -80,12 +85,12 @@ async def _get_random_word():
         return data[rand_index]
 
 
-async def check_string(guess: str, goal: str) -> List[str]:
+async def _check_string(guess: str, goal: str) -> Tuple[str, str]:
 
     guess = guess.lower()
 
     if guess == goal:
-        return [goal, "?????"]
+        return (goal, "?????")
 
     # helper function to replace a character in an index of a string
     def replace_idx(s: str, idx: int, letter: str) -> str:
@@ -112,7 +117,7 @@ async def check_string(guess: str, goal: str) -> List[str]:
             incorrect_spot = replace_idx(incorrect_spot, i, guess[i])
             goal_cnt[guess[i]] -= 1
 
-    return [correct_spot, incorrect_spot]
+    return (correct_spot, incorrect_spot)
 
 
 # ---------------------------------------------------------------------------- #
@@ -129,6 +134,11 @@ async def unauthorized(e):
     response.status_code = 401
     response.headers["WWW-Authenticate"] = 'Basic realm="User Login"'
     return response
+
+
+@app.errorhandler(404)
+async def not_found(e):
+    return {"error": f"Not Found: {e.description}"}, 404
 
 
 @app.errorhandler(409)
@@ -150,6 +160,9 @@ async def hello():
 async def register_user(data):
     db = await _get_db()
     user = dataclasses.asdict(data)
+
+    if not user["username"] or not user["password"]:
+        abort(400, "Username and password cannot be empty.")
 
     hashed_pw = await _hash_password(user["password"])
     user["password"] = hashed_pw
@@ -234,24 +247,30 @@ async def create_game(data):
 
     game["gameid"] = id
 
-    game_state = {"gameid": game["gameid"], "guesses": 6, "correct": 0, "incorrect": 0}
+    game_state = {
+        "gameid": game["gameid"],
+        "guesses": 6,
+        "correct": "??????",
+        "incorrect": "?????",
+        "completed": False,
+    }
     # create new row in game_states
     try:
         id = await db.execute(
             """
-            INSERT INTO game_states(gameid, guesses, correct, incorrect)
-            VALUES(:gameid, :guesses, :correct, :incorrect)
+            INSERT INTO game_states(gameid, guesses, correct, incorrect, completed)
+            VALUES(:gameid, :guesses, :correct, :incorrect, :completed)
             """,
             game_state,
         )
     except sqlite3.IntegrityError as e:
         abort(409, e)
 
-    return game_state, 201, dict(game_state)
+    return game_state, 201, {"Location": f"/games/{game['gameid']}"}
 
 
 # ---------------------------- retrieve game state --------------------------- #
-@app.route("/games/game/<int:gameid>", methods=["GET"])
+@app.route("/games/<int:gameid>", methods=["GET"])
 async def get_game_state(gameid):
     db = await _get_db()
     game_state = await db.fetch_one(
@@ -260,51 +279,83 @@ async def get_game_state(gameid):
     if game_state:
         return dict(game_state)
     else:
-        abort(404)
+        abort(404, "Game with that id does not exist.")
 
 
 # --------------------- make a guess / update game state --------------------- #
-@app.route("/games/game/<int:gameid>", methods=["POST"])
-async def check_guess(gameid):
-    gamestate = await get_game_state(gameid)
+@app.route("/games/<int:gameid>", methods=["POST"])
+@validate_request(Guess)
+async def check_guess(data, gameid):
+
     guess = await request.get_json()
+    guess = guess["guess"]
+
+    if len(guess) != 5:
+        abort(400, "Guess must be 5 letters long.")
+
     db = await _get_db()
-    secretword = await db.fetch_one(
-        "SELECT secretword FROM games WHERE gameid = :gameid", values={"gameid": gameid}
+
+    # perform lookup in db table "valid_words" to check if guess is valid
+    valid_word = await db.fetch_val(
+        "SELECT EXISTS(SELECT 1 FROM valid_words WHERE word = :word)",
+        values={"word": guess},
     )
-    print("guess", guess)
-    print("secretword", secretword[0])
-    if gamestate["guesses"] > 0:
-        gamestate["guesses"] -= 1
-        if guess["guess"] == secretword[0]:
-            try:
-                # Temp code just to make sure this works, but gamestate would call get game state function and decrement/increment as necessary
-                # then would update table with new values rather than inserting anything
-                gamestate["correct"] += len(secretword[0])
-                id = await db.execute(
-                    """
-                    UPDATE game_states SET guesses = :guesses, correct = :correct, incorrect = :incorrect WHERE gameid = :gameid
-                    """,
-                    gamestate,
-                )
-            except sqlite3.IntegrityError as e:
-                abort(400, e)
-            return gamestate, 201, dict(gamestate)
+
+    # 0 if not in table, 1 if in table
+    if valid_word == 0:
+        abort(400, "Guess is not a valid word.")
+
+    # fetch a tuple of (secretword, guesses) from db
+    info = await db.fetch_one(
+        """
+        SELECT secretword, guesses
+        FROM games INNER JOIN game_states ON games.gameid = game_states.gameid
+        WHERE games.gameid = :gameid
+        """,
+        {"gameid": gameid},
+    )
+
+    if not info:
+        abort(404, "Game with that id does not exist.")
+
+    # returns a tuple of formatted strings (correct, incorrect)
+    # ex: ("?a???", "???b?") -> a is correct spot, b is incorrect spot
+    state_fields = await _check_string(guess, info[0])
+
+    # check if there are any guesses left
+    if info[1] > 0:
+        # check if guess is correct and update game state
+        game_info = {
+            "gameid": gameid,
+            "guesses": info[1] - 1,
+            "correct": state_fields[0],
+            "incorrect": state_fields[1],
+            "completed": False,
+        }
+        if guess == info[0]:
+            game_info["completed"] = True
+            await db.execute(
+                """
+                UPDATE game_states
+                SET completed = :completed, guesses = :guesses, correct = :correct, incorrect = :incorrect
+                WHERE gameid = :gameid
+                """,
+                values=game_info,
+            )
+        # if guess is incorrect, update game state
         else:
-            gamestate["correct"] = await check_string(guess["guess"], secretword[0])
-            gamestate["incorrect"] = len(secretword[0]) - gamestate["correct"]
-            try:
-                id = await db.execute(
-                    """
-                    UPDATE game_states SET guesses = :guesses, correct = :correct, incorrect = :incorrect WHERE gameid = :gameid
-                    """,
-                    gamestate,
-                )
-            except sqlite3.IntegrityError as e:
-                abort(400, e)
-            return gamestate, 201, dict(gamestate)
+            await db.execute(
+                """
+                UPDATE game_states
+                SET completed = :completed, guesses = guesses - 1, guesses = :guesses, correct = :correct, incorrect = :incorrect
+                WHERE gameid = :gameid
+                """,
+                values=game_info,
+            )
     else:
-        return {"Error": "Out of guesses!"}
+        abort(400, "No guesses left.")
+
+    return game_info, 200
 
 
 # -----------------------------------Listing in progress games------------------------#
@@ -320,4 +371,4 @@ async def get_progress_game(username):
         print("Progress of game:", progress_game)
         return list(map(dict, progress_game))
     else:
-        abort(404)
+        abort(404, "No games in progress for that user.")
