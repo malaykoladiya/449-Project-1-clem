@@ -60,16 +60,6 @@ async def _hash_password(password: str, salt: str = None):
 
     return f"{salt}${pw_hash}"
 
-
-async def _verify_password(password: str, hashed_password: str) -> bool:
-    if not hashed_password or hashed_password.count("$") != 1:
-        return False
-
-    salt = hashed_password.split("$")[0]
-    computed_hash = await _hash_password(password, salt)
-    return secrets.compare_digest(hashed_password, computed_hash)
-
-
 async def _get_db():
     db = getattr(g, "_database", None)
     if db is None:
@@ -149,10 +139,6 @@ async def username_exists(e):
 # ---------------------------------------------------------------------------- #
 #                                  api routes                                  #
 # ---------------------------------------------------------------------------- #
-@app.route("/")
-async def hello():
-    return "Hello World"
-
 
 # --------------------------------- register --------------------------------- #
 @app.route("/register", methods=["POST"])
@@ -233,40 +219,48 @@ async def create_game(data):
 
     db = await _get_db()
 
-    # create new row in game
-    try:
-        id = await db.execute(
-            """
-            INSERT INTO games(secretword, username)
-            VALUES(:secretword, :username)
-            """,
-            game,
+    username = await db.fetch_one(
+            "SELECT * from users WHERE username = :username",
+            values={"username": game["username"]},
         )
-    except sqlite3.IntegrityError as e:
-        abort(409, e)
 
-    game["gameid"] = id
+    if username:
+        # create new row in game
+        try:
+            id = await db.execute(
+                """
+                INSERT INTO games(secretword, username)
+                VALUES(:secretword, :username)
+                """,
+                game,
+            )
+        except sqlite3.IntegrityError as e:
+            abort(409, e)
 
-    game_state = {
-        "gameid": game["gameid"],
-        "guesses": 6,
-        "correct": "??????",
-        "incorrect": "?????",
-        "completed": False,
-    }
-    # create new row in game_states
-    try:
-        id = await db.execute(
-            """
-            INSERT INTO game_states(gameid, guesses, correct, incorrect, completed)
-            VALUES(:gameid, :guesses, :correct, :incorrect, :completed)
-            """,
-            game_state,
-        )
-    except sqlite3.IntegrityError as e:
-        abort(409, e)
+        game["gameid"] = id
 
-    return game_state, 201, {"Location": f"/games/{game['gameid']}"}
+        game_state = {
+            "gameid": game["gameid"],
+            "guesses": 6,
+            "correct": "?????",
+            "incorrect": "?????",
+            "completed": False,
+        }
+        # create new row in game_states
+        try:
+            id = await db.execute(
+                """
+                INSERT INTO game_states(gameid, guesses, correct, incorrect, completed)
+                VALUES(:gameid, :guesses, :correct, :incorrect, :completed)
+                """,
+                game_state,
+            )
+        except sqlite3.IntegrityError as e:
+            abort(409, e)
+
+        return game_state, 201, {"Location": f"/games/{game['gameid']}"}
+    
+    return "User does not exist.", 401
 
 
 # ---------------------------- retrieve game state --------------------------- #
