@@ -7,14 +7,30 @@ import hashlib
 import secrets
 
 from quart import Quart, g, request, abort, make_response
-from quart_schema import validate_request, QuartSchema
+from quart_schema import (
+    tag,
+    validate_request,
+    QuartSchema,
+    RequestSchemaValidationError,
+    validate_response,
+)
 from random import randint
 from typing import List, Tuple
 
 app = Quart(__name__)
-QuartSchema(app)
+QuartSchema(app, title="CPSC 449 Project 1 Group 24", version="1.0.0")
 
 app.config.from_file("./etc/wordle.toml", toml.load)
+
+
+@dataclasses.dataclass
+class Error:
+    error: str
+
+
+@dataclasses.dataclass
+class AuthorizedUser:
+    authenticated: bool
 
 
 @dataclasses.dataclass
@@ -31,15 +47,27 @@ class User:
 @dataclasses.dataclass
 class Game:
     username: str
-    secretword: str = "blank"
 
 
 @dataclasses.dataclass
 class GameState:
+    """The state of the game including information about last guess."""
+
     gameid: int
-    guesses: int
-    correct: int
-    incorrect: int
+    guesses: int = 6
+    correct: str = "h??lo"
+    incorrect: str = "??e??"
+    completed: bool = False
+
+
+@dataclasses.dataclass
+class UserGames:
+    __root__: List[GameState]
+
+
+@dataclasses.dataclass
+class Main:
+    title: str = "Wordle"
 
 
 # ---------------------------------------------------------------------------- #
@@ -59,6 +87,7 @@ async def _hash_password(password: str, salt: str = None):
     ).hex()
 
     return f"{salt}${pw_hash}"
+
 
 async def _get_db():
     db = getattr(g, "_database", None)
@@ -141,9 +170,14 @@ async def username_exists(e):
 # ---------------------------------------------------------------------------- #
 
 # --------------------------------- register --------------------------------- #
-@app.route("/register", methods=["POST"])
+@app.route("/auth/register", methods=["POST"])
+@tag(["auth"])
 @validate_request(User)
+@validate_response(User, 201)
+@validate_response(Error, 400)
+@validate_response(Error, 409)
 async def register_user(data):
+    """Register a new user with a username and password."""
     db = await _get_db()
     user = dataclasses.asdict(data)
 
@@ -168,8 +202,16 @@ async def register_user(data):
 
 
 # ---------------------------------- sign in --------------------------------- #
-@app.route("/signin")
+@app.route("/auth/signin")
+@tag(["auth"])
+@validate_response(AuthorizedUser, 200)
+@validate_response(Error, 400)
+@validate_response(Error, 401)
 async def signin():
+    """
+    Check if a username/password combination is valid.
+    Uses Basic Auth passed through Authorization header.
+    """
 
     auth = request.authorization
 
@@ -207,22 +249,26 @@ async def signin():
         abort(401, "Incorrect password.")
 
     # finally, return authenticated = true
-    return {"authenticated": True, "user": auth.username}, 200
+    return {"authenticated": True}, 200
 
 
 # -------------------------------- create game ------------------------------- #
 @app.route("/games/create", methods=["POST"])
+@tag(["games"])
 @validate_request(Game)
+@validate_response(GameState, 201)
+@validate_response(Error, 400)
 async def create_game(data):
+    """Create a new game for a user with a random word."""
     game = dataclasses.asdict(data)
     game["secretword"] = await _get_random_word()
 
     db = await _get_db()
 
     username = await db.fetch_one(
-            "SELECT * from users WHERE username = :username",
-            values={"username": game["username"]},
-        )
+        "SELECT * from users WHERE username = :username",
+        values={"username": game["username"]},
+    )
 
     if username:
         # create new row in game
@@ -259,13 +305,17 @@ async def create_game(data):
             abort(409, e)
 
         return game_state, 201, {"Location": f"/games/{game['gameid']}"}
-    
-    return "User does not exist.", 401
+
+    return "User does not exist.", 400
 
 
 # ---------------------------- retrieve game state --------------------------- #
 @app.route("/games/<int:gameid>", methods=["GET"])
+@tag(["games"])
+@validate_response(GameState, 200)
+@validate_response(Error, 404)
 async def get_game_state(gameid):
+    """Retrieve the state of a game with a given gameid."""
     db = await _get_db()
     game_state = await db.fetch_one(
         "SELECT * FROM game_states WHERE gameid = :gameid", values={"gameid": gameid}
@@ -278,8 +328,12 @@ async def get_game_state(gameid):
 
 # --------------------- make a guess / update game state --------------------- #
 @app.route("/games/<int:gameid>", methods=["POST"])
+@tag(["games"])
 @validate_request(Guess)
+@validate_response(GameState, 200)
+@validate_response(Error, 400)
 async def check_guess(data, gameid):
+    """Make a guess for a game with a given gameid. Returns updated game state."""
 
     guess = await request.get_json()
     guess = guess["guess"]
@@ -354,7 +408,10 @@ async def check_guess(data, gameid):
 
 # -----------------------------------Listing in progress games------------------------#
 @app.route("/users/<string:username>", methods=["GET"])
+@validate_response(UserGames, 200)
+@validate_response(Error, 404)
 async def get_progress_game(username):
+    """Retrieve the list of games in progress for a user with a given username."""
     db = await _get_db()
     progress_game = await db.fetch_all(
         "SELECT games.gameid,username FROM games LEFT JOIN game_states ON games.gameid = game_states.gameid  WHERE username = :username AND game_states.guesses != 0",
