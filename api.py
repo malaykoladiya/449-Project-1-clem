@@ -9,6 +9,7 @@ import secrets
 from quart import Quart, g, request, abort, make_response
 from quart_schema import validate_request, QuartSchema
 from random import randint
+from typing import List
 
 app = Quart(__name__)
 QuartSchema(app)
@@ -25,7 +26,7 @@ class User:
 @dataclasses.dataclass
 class Game:
     username: str
-    secretword: str = 'blank'
+    secretword: str = "blank"
 
 
 @dataclasses.dataclass
@@ -35,6 +36,10 @@ class GameState:
     correct: int
     incorrect: int
 
+
+# ---------------------------------------------------------------------------- #
+#                                 helper funcs                                 #
+# ---------------------------------------------------------------------------- #
 
 # functions to hash and verify from https://til.simonwillison.net/python/password-hashing-with-pbkdf2
 async def _hash_password(password: str, salt: str = None):
@@ -75,12 +80,39 @@ async def _get_random_word():
         return data[rand_index]
 
 
-async def check_string(string: str, word: str):
-    correct = 0
-    for i in string:
-        if (i.find(word)):
-            correct += 1
-    return correct
+async def check_string(guess: str, goal: str) -> List[str]:
+
+    guess = guess.lower()
+
+    if guess == goal:
+        return [goal, "?????"]
+
+    # helper function to replace a character in an index of a string
+    def replace_idx(s: str, idx: int, letter: str) -> str:
+        return s[:idx] + letter + s[idx + 1 :]
+
+    # create a hashmap of goal string and letter count
+    goal_cnt = {}
+    for letter in goal:
+        goal_cnt[letter] = goal_cnt.get(letter, 0) + 1
+
+    correct_spot = "?????"
+    incorrect_spot = "?????"
+
+    # first pass to check for correct spot which deals with duplicates,
+    # ex: guess = "hello", goal = "world", we dont want to count the first 'l'.
+    for i in range(len(guess)):
+        if guess[i] == goal[i]:
+            correct_spot = replace_idx(correct_spot, i, guess[i])
+            goal_cnt[guess[i]] -= 1
+
+    # second pass to check for incorrect spot
+    for i in range(len(guess)):
+        if guess[i] != goal[i] and goal_cnt.get(guess[i], 0) > 0:
+            incorrect_spot = replace_idx(incorrect_spot, i, guess[i])
+            goal_cnt[guess[i]] -= 1
+
+    return [correct_spot, incorrect_spot]
 
 
 # ---------------------------------------------------------------------------- #
@@ -202,8 +234,7 @@ async def create_game(data):
 
     game["gameid"] = id
 
-    game_state = {"gameid": game["gameid"],
-                  "guesses": 6, "correct": 0, "incorrect": 0}
+    game_state = {"gameid": game["gameid"], "guesses": 6, "correct": 0, "incorrect": 0}
     # create new row in game_states
     try:
         id = await db.execute(
@@ -218,39 +249,38 @@ async def create_game(data):
 
     return game_state, 201, dict(game_state)
 
+
 # ---------------------------- retrieve game state --------------------------- #
-
-
 @app.route("/games/game/<int:gameid>", methods=["GET"])
 async def get_game_state(gameid):
     db = await _get_db()
     game_state = await db.fetch_one(
-        "SELECT * FROM game_states WHERE gameid = :gameid",
-        values={"gameid": gameid}
+        "SELECT * FROM game_states WHERE gameid = :gameid", values={"gameid": gameid}
     )
     if game_state:
         return dict(game_state)
     else:
         abort(404)
 
-#--- make a guess / update game state ---#
 
-
+# --------------------- make a guess / update game state --------------------- #
 @app.route("/games/game/<int:gameid>", methods=["POST"])
 async def check_guess(gameid):
     gamestate = await get_game_state(gameid)
     guess = await request.get_json()
     db = await _get_db()
-    secretword = await db.fetch_one("SELECT secretword FROM games WHERE gameid = :gameid", values={"gameid": gameid})
-    print("guess",guess)
-    print("secretword",secretword[0])
-    if gamestate['guesses'] > 0:
-        gamestate['guesses'] -= 1
-        if guess['guess'] == secretword[0]:
+    secretword = await db.fetch_one(
+        "SELECT secretword FROM games WHERE gameid = :gameid", values={"gameid": gameid}
+    )
+    print("guess", guess)
+    print("secretword", secretword[0])
+    if gamestate["guesses"] > 0:
+        gamestate["guesses"] -= 1
+        if guess["guess"] == secretword[0]:
             try:
-            # Temp code just to make sure this works, but gamestate would call get game state function and decrement/increment as necessary
-            # then would update table with new values rather than inserting anything
-                gamestate['correct'] += len(secretword[0])
+                # Temp code just to make sure this works, but gamestate would call get game state function and decrement/increment as necessary
+                # then would update table with new values rather than inserting anything
+                gamestate["correct"] += len(secretword[0])
                 id = await db.execute(
                     """
                     UPDATE game_states SET guesses = :guesses, correct = :correct, incorrect = :incorrect WHERE gameid = :gameid
@@ -261,8 +291,8 @@ async def check_guess(gameid):
                 abort(400, e)
             return gamestate, 201, dict(gamestate)
         else:
-            gamestate['correct'] = await check_string(guess['guess'], secretword[0])
-            gamestate['incorrect'] = len(secretword[0]) - gamestate['correct']
+            gamestate["correct"] = await check_string(guess["guess"], secretword[0])
+            gamestate["incorrect"] = len(secretword[0]) - gamestate["correct"]
             try:
                 id = await db.execute(
                     """
@@ -275,17 +305,19 @@ async def check_guess(gameid):
             return gamestate, 201, dict(gamestate)
     else:
         return {"Error": "Out of guesses!"}
-#-----------------------------------Listing in progress games------------------------#
-@app.route("/users/<string:username>",methods=["GET"])      
+
+
+# -----------------------------------Listing in progress games------------------------#
+@app.route("/users/<string:username>", methods=["GET"])
 async def get_progress_game(username):
-    db=await _get_db()
-    progress_game= await db.fetch_all(
+    db = await _get_db()
+    progress_game = await db.fetch_all(
         "SELECT games.gameid,username FROM games LEFT JOIN game_states ON games.gameid = game_states.gameid  WHERE username = :username AND game_states.guesses != 0",
-        values={"username":username}
-        )
-    
+        values={"username": username},
+    )
+
     if progress_game:
-        print("Progress of game:",progress_game)
+        print("Progress of game:", progress_game)
         return list(map(dict, progress_game))
     else:
         abort(404)
