@@ -11,14 +11,19 @@ from quart_schema import (
     tag,
     validate_request,
     QuartSchema,
-    RequestSchemaValidationError,
     validate_response,
 )
 from random import randint
 from typing import List, Tuple
 
+app_info = {
+    "title": "CPSC 449 - Project 1 - Group 24",
+    "description": "A backend API replicating the functionality of Wordle.",
+    "version": "1.0.0",
+}
+
 app = Quart(__name__)
-QuartSchema(app, title="CPSC 449 Project 1 Group 24", version="1.0.0")
+QuartSchema(app, info=app_info)
 
 app.config.from_file("./etc/wordle.toml", toml.load)
 
@@ -414,7 +419,11 @@ async def get_progress_game(username):
     """Retrieve the list of games in progress for a user with a given username."""
     db = await _get_db()
     progress_game = await db.fetch_all(
-        "SELECT games.gameid,username FROM games LEFT JOIN game_states ON games.gameid = game_states.gameid  WHERE username = :username AND game_states.guesses != 0",
+        """
+        SELECT games.gameid,username
+        FROM games LEFT JOIN game_states ON games.gameid = game_states.gameid 
+        WHERE username = :username AND game_states.guesses != 0
+        """,
         values={"username": username},
     )
 
