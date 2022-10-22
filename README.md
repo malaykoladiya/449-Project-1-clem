@@ -85,6 +85,24 @@ Retrieve game state:
     "incorrect": "?????"
 }
 
+Make a guess:
+* If guess made by user is correct then return 200 OK with {
+    "completed": true,
+    "correct": "secretword",
+    "gameid": 3,
+    "guesses": 5,
+    "incorrect": "?????"
+}
+* If user guess involves less/more letters (>5 or <5) then return {
+    "error": "Bad Request: Guess must be 5 letters long."
+}
+
+* If guess is not a valid word then return 400 {
+    "error": "Bad Request: Guess is not a valid word."
+}
+
+
+
 
 
 
