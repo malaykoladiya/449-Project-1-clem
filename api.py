@@ -52,8 +52,8 @@ class Game:
 class GameState:
     """The state of the game including information about last guess."""
 
-    gameid: int
-    guesses: int = 6
+    game_id: int
+    remaining_guesses: int = 6
     correct: str = "h??lo"
     incorrect: str = "??e??"
     completed: bool = False
@@ -255,7 +255,7 @@ async def signin():
 async def create_game(data):
     """Create a new game for a user with a random word."""
     game = dataclasses.asdict(data)
-    game["secretword"] = await _get_random_word()
+    game["secret_word"] = await _get_random_word()
 
     db = await _get_db()
 
@@ -269,19 +269,19 @@ async def create_game(data):
         try:
             id = await db.execute(
                 """
-                INSERT INTO games(secretword, username)
-                VALUES(:secretword, :username)
+                INSERT INTO games(secret_word, username)
+                VALUES(:secret_word, :username)
                 """,
                 game,
             )
         except sqlite3.IntegrityError as e:
             abort(409, e)
 
-        game["gameid"] = id
+        game["game_id"] = id
 
         game_state = {
-            "gameid": game["gameid"],
-            "guesses": 6,
+            "game_id": game["game_id"],
+            "remaining_guesses": 6,
             "correct": "?????",
             "incorrect": "?????",
             "completed": False,
@@ -290,29 +290,30 @@ async def create_game(data):
         try:
             id = await db.execute(
                 """
-                INSERT INTO game_states(gameid, guesses, correct, incorrect, completed)
-                VALUES(:gameid, :guesses, :correct, :incorrect, :completed)
+                INSERT INTO game_states(game_id, remaining_guesses, correct, incorrect, completed)
+                VALUES(:game_id, :remaining_guesses, :correct, :incorrect, :completed)
                 """,
                 game_state,
             )
         except sqlite3.IntegrityError as e:
             abort(409, e)
 
-        return game_state, 201, {"Location": f"/games/{game['gameid']}"}
+        return game_state, 201, {"Location": f"/games/{game['game_id']}"}
 
     return "User does not exist.", 400
 
 
 # ---------------------------- retrieve game state --------------------------- #
-@app.route("/games/<int:gameid>", methods=["GET"])
+@app.route("/games/<int:game_id>", methods=["GET"])
 @tag(["games"])
 @validate_response(GameState, 200)
 @validate_response(Error, 404)
-async def get_game_state(gameid):
-    """Retrieve the state of a game with a given gameid."""
+async def get_game_state(game_id):
+    """Retrieve the state of a game with a given game_id."""
     db = await _get_db()
     game_state = await db.fetch_one(
-        "SELECT * FROM game_states WHERE gameid = :gameid", values={"gameid": gameid}
+        "SELECT * FROM game_states WHERE game_id = :game_id",
+        values={"game_id": game_id},
     )
     if game_state:
         return dict(game_state)
@@ -321,13 +322,13 @@ async def get_game_state(gameid):
 
 
 # --------------------- make a guess / update game state --------------------- #
-@app.route("/games/<int:gameid>", methods=["POST"])
+@app.route("/games/<int:game_id>", methods=["POST"])
 @tag(["games"])
 @validate_request(Guess)
 @validate_response(GameState, 200)
 @validate_response(Error, 400)
-async def check_guess(data, gameid):
-    """Make a guess for a game with a given gameid. Returns updated game state."""
+async def check_guess(data, game_id):
+    """Make a guess for a game with a given game_id. Returns updated game state."""
 
     guess = await request.get_json()
     guess = guess["guess"]
@@ -347,14 +348,14 @@ async def check_guess(data, gameid):
     if valid_word == 0:
         abort(400, "Guess is not a valid word.")
 
-    # fetch a tuple of (secretword, guesses) from db
+    # fetch a tuple of (secret_word, remaining_guesses) from db
     info = await db.fetch_one(
         """
-        SELECT secretword, guesses
-        FROM games INNER JOIN game_states ON games.gameid = game_states.gameid
-        WHERE games.gameid = :gameid
+        SELECT secret_word, remaining_guesses
+        FROM games INNER JOIN game_states ON games.game_id = game_states.game_id
+        WHERE games.game_id = :game_id
         """,
-        {"gameid": gameid},
+        {"game_id": game_id},
     )
 
     if not info:
@@ -364,12 +365,12 @@ async def check_guess(data, gameid):
     # ex: ("?a???", "???b?") -> a is correct spot, b is incorrect spot
     state_fields = await _check_string(guess, info[0])
 
-    # check if there are any guesses left
+    # check if there are any remaining_guesses left
     if info[1] > 0:
         # check if guess is correct and update game state
         game_info = {
-            "gameid": gameid,
-            "guesses": info[1] - 1,
+            "game_id": game_id,
+            "remaining_guesses": info[1] - 1,
             "correct": state_fields[0],
             "incorrect": state_fields[1],
             "completed": False,
@@ -379,8 +380,8 @@ async def check_guess(data, gameid):
             await db.execute(
                 """
                 UPDATE game_states
-                SET completed = :completed, guesses = :guesses, correct = :correct, incorrect = :incorrect
-                WHERE gameid = :gameid
+                SET completed = :completed, remaining_guesses = :remaining_guesses, correct = :correct, incorrect = :incorrect
+                WHERE game_id = :game_id
                 """,
                 values=game_info,
             )
@@ -389,8 +390,8 @@ async def check_guess(data, gameid):
             await db.execute(
                 """
                 UPDATE game_states
-                SET completed = :completed, guesses = guesses - 1, guesses = :guesses, correct = :correct, incorrect = :incorrect
-                WHERE gameid = :gameid
+                SET completed = :completed, remaining_guesses = remaining_guesses - 1, remaining_guesses = :remaining_guesses, correct = :correct, incorrect = :incorrect
+                WHERE game_id = :game_id
                 """,
                 values=game_info,
             )
@@ -407,9 +408,9 @@ async def get_progress_game(username):
     db = await _get_db()
     progress_game = await db.fetch_all(
         """
-        SELECT games.gameid,username
-        FROM games LEFT JOIN game_states ON games.gameid = game_states.gameid 
-        WHERE username = :username AND game_states.guesses != 0
+        SELECT games.game_id,username
+        FROM games LEFT JOIN game_states ON games.game_id = game_states.game_id 
+        WHERE username = :username AND game_states.status = 'In Progress'
         """,
         values={"username": username},
     )
