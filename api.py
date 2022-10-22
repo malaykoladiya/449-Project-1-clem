@@ -16,14 +16,8 @@ from quart_schema import (
 from random import randint
 from typing import List, Tuple
 
-app_info = {
-    "title": "CPSC 449 - Project 1 - Group 24",
-    "description": "A backend API replicating the functionality of Wordle.",
-    "version": "1.0.0",
-}
-
 app = Quart(__name__)
-QuartSchema(app, info=app_info)
+QuartSchema(app)
 
 app.config.from_file("./etc/wordle.toml", toml.load)
 
@@ -63,11 +57,6 @@ class GameState:
     correct: str = "h??lo"
     incorrect: str = "??e??"
     completed: bool = False
-
-
-@dataclasses.dataclass
-class UserGames:
-    __root__: List[GameState]
 
 
 @dataclasses.dataclass
@@ -413,8 +402,6 @@ async def check_guess(data, gameid):
 
 # -----------------------------------Listing in progress games------------------------#
 @app.route("/users/<string:username>", methods=["GET"])
-@validate_response(UserGames, 200)
-@validate_response(Error, 404)
 async def get_progress_game(username):
     """Retrieve the list of games in progress for a user with a given username."""
     db = await _get_db()
@@ -426,7 +413,7 @@ async def get_progress_game(username):
         """,
         values={"username": username},
     )
-
+    print("Progress of game1:", progress_game)
     if progress_game:
         print("Progress of game:", progress_game)
         return list(map(dict, progress_game))
