@@ -14,7 +14,7 @@ from quart_schema import (
     validate_response,
 )
 from random import randint
-from typing import List, Tuple
+from typing import Tuple
 
 app = Quart(__name__)
 QuartSchema(app)
@@ -44,8 +44,15 @@ class User:
 
 
 @dataclasses.dataclass
-class Game:
+class CreateGame:
     username: str
+
+
+@dataclasses.dataclass
+class CreatedGame:
+    game_id: int
+    remaining_guesses: int = 6
+    status: str = "In Progress"
 
 
 @dataclasses.dataclass
@@ -53,15 +60,10 @@ class GameState:
     """The state of the game including information about last guess."""
 
     game_id: int
+    guess: str
+    correct_spots: str = "hel??"
+    incorrect_spots: str = "?or??"
     remaining_guesses: int = 6
-    correct: str = "h??lo"
-    incorrect: str = "??e??"
-    completed: bool = False
-
-
-@dataclasses.dataclass
-class Main:
-    title: str = "Wordle"
 
 
 # ---------------------------------------------------------------------------- #
@@ -249,8 +251,8 @@ async def signin():
 # -------------------------------- create game ------------------------------- #
 @app.route("/games/create", methods=["POST"])
 @tag(["games"])
-@validate_request(Game)
-@validate_response(GameState, 201)
+@validate_request(CreateGame)
+@validate_response(CreatedGame, 201)
 @validate_response(Error, 400)
 async def create_game(data):
     """Create a new game for a user with a random word."""
@@ -282,16 +284,14 @@ async def create_game(data):
         game_state = {
             "game_id": game["game_id"],
             "remaining_guesses": 6,
-            "correct": "?????",
-            "incorrect": "?????",
-            "completed": False,
+            "status": "In Progress",
         }
         # create new row in game_states
         try:
             id = await db.execute(
                 """
-                INSERT INTO game_states(game_id, remaining_guesses, correct, incorrect, completed)
-                VALUES(:game_id, :remaining_guesses, :correct, :incorrect, :completed)
+                INSERT INTO game_states(game_id, remaining_guesses, status)
+                VALUES(:game_id, :remaining_guesses, :status)
                 """,
                 game_state,
             )
@@ -300,23 +300,56 @@ async def create_game(data):
 
         return game_state, 201, {"Location": f"/games/{game['game_id']}"}
 
-    return "User does not exist.", 400
+    else:
+        abort(404, "Username does not exist.")
 
 
 # ---------------------------- retrieve game state --------------------------- #
 @app.route("/games/<int:game_id>", methods=["GET"])
 @tag(["games"])
-@validate_response(GameState, 200)
 @validate_response(Error, 404)
 async def get_game_state(game_id):
-    """Retrieve the state of a game with a given game_id."""
+    """Retrieve the history of a game or the result if it is over."""
     db = await _get_db()
-    game_state = await db.fetch_one(
-        "SELECT * FROM game_states WHERE game_id = :game_id",
+
+    # we need all rows in game_history for the game_id
+    # join with game_states and games to get secret_word, status, and remaining_guesses
+    # [0] = game_id, [1] = guess, [2] = secret_word, [3] = status,
+    # [4] = remaining_guesses in guess for history, [5] = remaining guesses in game_states
+    game_states = await db.fetch_all(
+        """
+        SELECT
+            game_states.game_id, game_history.guess, games.secret_word,
+            game_states.status, game_history.remaining_guesses, 
+            game_states.remaining_guesses
+        FROM game_states
+            INNER JOIN game_history ON game_states.game_id = game_history.game_id
+            INNER JOIN games ON game_states.game_id = games.game_id
+        WHERE game_states.game_id = :game_id
+        """,
         values={"game_id": game_id},
     )
-    if game_state:
-        return dict(game_state)
+
+    if game_states:
+        response = []
+        for state in game_states:
+            if state[3] == "In Progress":
+                evaluation = await _check_string(state[1], state[2])
+                state_info = {
+                    "game_id": state[0],
+                    "guess": state[1],
+                    "remaining_guesses": state[4],
+                    "correct_spots": evaluation[0],
+                    "incorrect_spots": evaluation[1],
+                }
+                response.append(state_info)
+            elif state[3] == "won" or state[3] == "lost":
+                return {
+                    "game_id": state[0],
+                    "status": state[3],
+                    "remaining_guesses": state[5],
+                }, 200
+        return response, 200
     else:
         abort(404, "Game with that id does not exist.")
 
@@ -361,40 +394,53 @@ async def check_guess(data, game_id):
     if not info:
         abort(404, "Game with that id does not exist.")
 
-    # returns a tuple of formatted strings (correct, incorrect)
-    # ex: ("?a???", "???b?") -> a is correct spot, b is incorrect spot
-    state_fields = await _check_string(guess, info[0])
-
     # check if there are any remaining_guesses left
     if info[1] > 0:
-        # check if guess is correct and update game state
+        # returns a tuple of formatted strings (correct_spots, incorrect_spots)
+        # ex: ("?a???", "???b?") -> a is correct spot, b is incorrect spot
+        state_fields = await _check_string(guess, info[0])
+
+        # initialize game_state info
         game_info = {
             "game_id": game_id,
             "remaining_guesses": info[1] - 1,
-            "correct": state_fields[0],
-            "incorrect": state_fields[1],
-            "completed": False,
+            "status": "In Progress",
         }
+
+        # insert into game_history
+        await db.execute(
+            """
+            INSERT INTO game_history(game_id, guess, remaining_guesses)
+            VALUES(:game_id, :guess, :remaining_guesses)
+            """,
+            values={
+                "game_id": game_id,
+                "guess": guess,
+                "remaining_guesses": info[1] - 1,
+            },
+        )
+
+        # check if the guess was correct
         if guess == info[0]:
-            game_info["completed"] = True
-            await db.execute(
-                """
-                UPDATE game_states
-                SET completed = :completed, remaining_guesses = :remaining_guesses, correct = :correct, incorrect = :incorrect
-                WHERE game_id = :game_id
-                """,
-                values=game_info,
-            )
-        # if guess is incorrect, update game state
+            game_info["status"] = "won"
         else:
-            await db.execute(
-                """
-                UPDATE game_states
-                SET completed = :completed, remaining_guesses = remaining_guesses - 1, remaining_guesses = :remaining_guesses, correct = :correct, incorrect = :incorrect
-                WHERE game_id = :game_id
-                """,
-                values=game_info,
-            )
+            if game_info["remaining_guesses"] == 0:
+                game_info["status"] = "lost"
+
+        # update the game_states table
+        await db.execute(
+            """
+            UPDATE game_states
+            SET status = :status, remaining_guesses = :remaining_guesses
+            WHERE game_id = :game_id
+            """,
+            values=game_info,
+        )
+
+        # insert game_state info into response (correct_spots, incorrect_spots)
+        game_info["correct_spots"] = state_fields[0]
+        game_info["incorrect_spots"] = state_fields[1]
+        game_info["guess"] = guess
     else:
         abort(400, "No guesses left.")
 
@@ -408,7 +454,7 @@ async def get_progress_game(username):
     db = await _get_db()
     progress_game = await db.fetch_all(
         """
-        SELECT games.game_id,username
+        SELECT games.game_id, username, remaining_guesses
         FROM games LEFT JOIN game_states ON games.game_id = game_states.game_id 
         WHERE username = :username AND game_states.status = 'In Progress'
         """,
