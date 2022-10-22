@@ -17,21 +17,21 @@ The implementation of API is done in Python using the Quart framework and some a
 To initialize the sqlite database, navigate to the project directory using a terminal and then type in ./bin/init.sh or sh ./bin/init.sh and then create a locally hosted server by using foreman start
 
 # How to use endpoints
-To register a new user: http POST localhost:5000/auth/register username={user} password={pass}
-To sign in: http -a {username}:{password} localhost:5000/auth/signin
-To create a game: http POST localhost:5000/games/create username={username}
-To make a guess: http POST localhost:5000/games/{gameid} guess={guess}
+- To register a new user: http POST localhost:5000/auth/register username={user} password={pass}
+- To sign in: http -a {username}:{password} localhost:5000/auth/signin
+- To create a game: http POST localhost:5000/games/create username={username}
+- To make a guess: http POST localhost:5000/games/{gameid} guess={guess}
 
 
  # Features:
  Creating a RESTful API that perform the following functionalities:
 
- -User registration
- -User Signin(Authentication with password hashing)
- -Starting a new game
- -Make a guess
- -Retrieve state of in progress games
- -Listing in-progress games
+ - User registration
+ - User Signin(Authentication with password hashing)
+ - Starting a new game
+ - Make a guess
+ - Retrieve state of in progress games
+ - Listing in-progress games
 
 # Database:
 The var folder holds wordle.db which contains the following tables:
