@@ -14,14 +14,15 @@ The goal is to Design endpoints for an application similar to Wordle.It will all
 The implementation of API is done in Python using the Quart framework and some ancillary tools like Foreman and sqlite3.The project also requires to create relational database schemas for the API implementation.
 
 # How to initialize
-To initialize the sqlite database, navigate to the project directory using a terminal and then type in ./bin/init.sh or sh ./bin/init.sh and then create a locally hosted server by using foreman start
+To initialize the sqlite database, navigate to the project directory using a terminal and then type in `./bin/init.sh` or `sh ./bin/init.sh` and then create a locally hosted server by using `foreman start`
 
 # How to use endpoints
-- To register a new user: http POST localhost:5000/auth/register username={user} password={pass}
-- To sign in: http -a {username}:{password} localhost:5000/auth/signin
-- To create a game: http POST localhost:5000/games/create username={username}
-- To make a guess: http POST localhost:5000/games/{gameid} guess={guess}
+- To register a new user: `http POST localhost:5000/auth/register username={user} password={pass}`
+- To sign in: `http -a {username}:{password} localhost:5000/auth/signin`
+- To create a game: `http POST localhost:5000/games/create username={username}`
+- To make a guess: `http POST localhost:5000/games/{gameid} guess={guess}`  
 
+Furthermore, you can view these endpoint in Quart Schema Documentation form when the server is running by navigating to `localhost:5000/docs`
 
  # Features:
  Creating a RESTful API that perform the following functionalities:
