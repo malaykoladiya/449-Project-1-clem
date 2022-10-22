@@ -27,7 +27,6 @@ if __name__ == "__main__":
     connection = sqlite3.connect("./var/wordle.db")
     cursor = connection.cursor()
 
-    print("Inserting words...")
     count = insert_valid_words(cursor)
     connection.commit()
-    print(f"Successfully inserted {count} words.")
+    print(f"Successfully inserted {'{:,}'.format(count)} words")

@@ -14,16 +14,10 @@ from quart_schema import (
     validate_response,
 )
 from random import randint
-from typing import List, Tuple
-
-app_info = {
-    "title": "CPSC 449 - Project 1 - Group 24",
-    "description": "A backend API replicating the functionality of Wordle.",
-    "version": "1.0.0",
-}
+from typing import Tuple
 
 app = Quart(__name__)
-QuartSchema(app, info=app_info)
+QuartSchema(app)
 
 app.config.from_file("./etc/wordle.toml", toml.load)
 
@@ -50,29 +44,26 @@ class User:
 
 
 @dataclasses.dataclass
-class Game:
+class CreateGame:
     username: str
+
+
+@dataclasses.dataclass
+class CreatedGame:
+    game_id: int
+    remaining_guesses: int = 6
+    status: str = "In Progress"
 
 
 @dataclasses.dataclass
 class GameState:
     """The state of the game including information about last guess."""
 
-    gameid: int
-    guesses: int = 6
-    correct: str = "h??lo"
-    incorrect: str = "??e??"
-    completed: bool = False
-
-
-@dataclasses.dataclass
-class UserGames:
-    __root__: List[GameState]
-
-
-@dataclasses.dataclass
-class Main:
-    title: str = "Wordle"
+    game_id: int
+    guess: str
+    correct_spots: str = "hel??"
+    incorrect_spots: str = "?or??"
+    remaining_guesses: int = 6
 
 
 # ---------------------------------------------------------------------------- #
@@ -191,6 +182,7 @@ async def register_user(data):
 
     hashed_pw = await _hash_password(user["password"])
     user["password"] = hashed_pw
+    user["username"] = user["username"].lower()
     try:
         id = await db.execute(
             """
@@ -260,13 +252,13 @@ async def signin():
 # -------------------------------- create game ------------------------------- #
 @app.route("/games/create", methods=["POST"])
 @tag(["games"])
-@validate_request(Game)
-@validate_response(GameState, 201)
+@validate_request(CreateGame)
+@validate_response(CreatedGame, 201)
 @validate_response(Error, 400)
 async def create_game(data):
     """Create a new game for a user with a random word."""
     game = dataclasses.asdict(data)
-    game["secretword"] = await _get_random_word()
+    game["secret_word"] = await _get_random_word()
 
     db = await _get_db()
 
@@ -280,65 +272,97 @@ async def create_game(data):
         try:
             id = await db.execute(
                 """
-                INSERT INTO games(secretword, username)
-                VALUES(:secretword, :username)
+                INSERT INTO games(secret_word, username)
+                VALUES(:secret_word, :username)
                 """,
                 game,
             )
         except sqlite3.IntegrityError as e:
             abort(409, e)
 
-        game["gameid"] = id
+        game["game_id"] = id
 
         game_state = {
-            "gameid": game["gameid"],
-            "guesses": 6,
-            "correct": "?????",
-            "incorrect": "?????",
-            "completed": False,
+            "game_id": game["game_id"],
+            "remaining_guesses": 6,
+            "status": "In Progress",
         }
         # create new row in game_states
         try:
             id = await db.execute(
                 """
-                INSERT INTO game_states(gameid, guesses, correct, incorrect, completed)
-                VALUES(:gameid, :guesses, :correct, :incorrect, :completed)
+                INSERT INTO game_states(game_id, remaining_guesses, status)
+                VALUES(:game_id, :remaining_guesses, :status)
                 """,
                 game_state,
             )
         except sqlite3.IntegrityError as e:
             abort(409, e)
 
-        return game_state, 201, {"Location": f"/games/{game['gameid']}"}
+        return game_state, 201, {"Location": f"/games/{game['game_id']}"}
 
-    return "User does not exist.", 400
+    else:
+        abort(404, "Username does not exist.")
 
 
 # ---------------------------- retrieve game state --------------------------- #
-@app.route("/games/<int:gameid>", methods=["GET"])
+@app.route("/games/<int:game_id>", methods=["GET"])
 @tag(["games"])
-@validate_response(GameState, 200)
 @validate_response(Error, 404)
-async def get_game_state(gameid):
-    """Retrieve the state of a game with a given gameid."""
+async def get_game_state(game_id):
+    """Retrieve the history of a game or the result if it is over."""
     db = await _get_db()
-    game_state = await db.fetch_one(
-        "SELECT * FROM game_states WHERE gameid = :gameid", values={"gameid": gameid}
+
+    # we need all rows in game_history for the game_id
+    # join with game_states and games to get secret_word, status, and remaining_guesses
+    # [0] = game_id, [1] = guess, [2] = secret_word, [3] = status,
+    # [4] = remaining_guesses in guess for history, [5] = remaining guesses in game_states
+    game_states = await db.fetch_all(
+        """
+        SELECT
+            game_states.game_id, game_history.guess, games.secret_word,
+            game_states.status, game_history.remaining_guesses, 
+            game_states.remaining_guesses
+        FROM game_states
+            INNER JOIN game_history ON game_states.game_id = game_history.game_id
+            INNER JOIN games ON game_states.game_id = games.game_id
+        WHERE game_states.game_id = :game_id
+        """,
+        values={"game_id": game_id},
     )
-    if game_state:
-        return dict(game_state)
+
+    if game_states:
+        response = []
+        for state in game_states:
+            if state[3] == "In Progress":
+                evaluation = await _check_string(state[1], state[2])
+                state_info = {
+                    "game_id": state[0],
+                    "guess": state[1],
+                    "remaining_guesses": state[4],
+                    "correct_spots": evaluation[0],
+                    "incorrect_spots": evaluation[1],
+                }
+                response.append(state_info)
+            elif state[3] == "won" or state[3] == "lost":
+                return {
+                    "game_id": state[0],
+                    "status": state[3],
+                    "remaining_guesses": state[5],
+                }, 200
+        return response, 200
     else:
-        abort(404, "Game with that id does not exist.")
+        abort(404, "No game history found for given game id.")
 
 
 # --------------------- make a guess / update game state --------------------- #
-@app.route("/games/<int:gameid>", methods=["POST"])
+@app.route("/games/<int:game_id>", methods=["POST"])
 @tag(["games"])
 @validate_request(Guess)
 @validate_response(GameState, 200)
 @validate_response(Error, 400)
-async def check_guess(data, gameid):
-    """Make a guess for a game with a given gameid. Returns updated game state."""
+async def check_guess(data, game_id):
+    """Make a guess for a game with a given game_id. Returns updated game state."""
 
     guess = await request.get_json()
     guess = guess["guess"]
@@ -358,53 +382,66 @@ async def check_guess(data, gameid):
     if valid_word == 0:
         abort(400, "Guess is not a valid word.")
 
-    # fetch a tuple of (secretword, guesses) from db
+    # fetch a tuple of (secret_word, remaining_guesses) from db
     info = await db.fetch_one(
         """
-        SELECT secretword, guesses
-        FROM games INNER JOIN game_states ON games.gameid = game_states.gameid
-        WHERE games.gameid = :gameid
+        SELECT secret_word, remaining_guesses
+        FROM games INNER JOIN game_states ON games.game_id = game_states.game_id
+        WHERE games.game_id = :game_id
         """,
-        {"gameid": gameid},
+        {"game_id": game_id},
     )
 
     if not info:
         abort(404, "Game with that id does not exist.")
 
-    # returns a tuple of formatted strings (correct, incorrect)
-    # ex: ("?a???", "???b?") -> a is correct spot, b is incorrect spot
-    state_fields = await _check_string(guess, info[0])
-
-    # check if there are any guesses left
+    # check if there are any remaining_guesses left
     if info[1] > 0:
-        # check if guess is correct and update game state
+        # returns a tuple of formatted strings (correct_spots, incorrect_spots)
+        # ex: ("?a???", "???b?") -> a is correct spot, b is incorrect spot
+        state_fields = await _check_string(guess, info[0])
+
+        # initialize game_state info
         game_info = {
-            "gameid": gameid,
-            "guesses": info[1] - 1,
-            "correct": state_fields[0],
-            "incorrect": state_fields[1],
-            "completed": False,
+            "game_id": game_id,
+            "remaining_guesses": info[1] - 1,
+            "status": "In Progress",
         }
+
+        # insert into game_history
+        await db.execute(
+            """
+            INSERT INTO game_history(game_id, guess, remaining_guesses)
+            VALUES(:game_id, :guess, :remaining_guesses)
+            """,
+            values={
+                "game_id": game_id,
+                "guess": guess,
+                "remaining_guesses": info[1] - 1,
+            },
+        )
+
+        # check if the guess was correct
         if guess == info[0]:
-            game_info["completed"] = True
-            await db.execute(
-                """
-                UPDATE game_states
-                SET completed = :completed, guesses = :guesses, correct = :correct, incorrect = :incorrect
-                WHERE gameid = :gameid
-                """,
-                values=game_info,
-            )
-        # if guess is incorrect, update game state
+            game_info["status"] = "won"
         else:
-            await db.execute(
-                """
-                UPDATE game_states
-                SET completed = :completed, guesses = guesses - 1, guesses = :guesses, correct = :correct, incorrect = :incorrect
-                WHERE gameid = :gameid
-                """,
-                values=game_info,
-            )
+            if game_info["remaining_guesses"] == 0:
+                game_info["status"] = "lost"
+
+        # update the game_states table
+        await db.execute(
+            """
+            UPDATE game_states
+            SET status = :status, remaining_guesses = :remaining_guesses
+            WHERE game_id = :game_id
+            """,
+            values=game_info,
+        )
+
+        # insert game_state info into response (correct_spots, incorrect_spots)
+        game_info["correct_spots"] = state_fields[0]
+        game_info["incorrect_spots"] = state_fields[1]
+        game_info["guess"] = guess
     else:
         abort(400, "No guesses left.")
 
@@ -413,20 +450,18 @@ async def check_guess(data, gameid):
 
 # -----------------------------------Listing in progress games------------------------#
 @app.route("/users/<string:username>", methods=["GET"])
-@validate_response(UserGames, 200)
-@validate_response(Error, 404)
 async def get_progress_game(username):
     """Retrieve the list of games in progress for a user with a given username."""
     db = await _get_db()
     progress_game = await db.fetch_all(
         """
-        SELECT games.gameid,username
-        FROM games LEFT JOIN game_states ON games.gameid = game_states.gameid 
-        WHERE username = :username AND game_states.guesses != 0
+        SELECT games.game_id, username, remaining_guesses
+        FROM games LEFT JOIN game_states ON games.game_id = game_states.game_id 
+        WHERE username = :username AND game_states.status = 'In Progress'
         """,
         values={"username": username},
     )
-
+    print("Progress of game1:", progress_game)
     if progress_game:
         print("Progress of game:", progress_game)
         return list(map(dict, progress_game))
