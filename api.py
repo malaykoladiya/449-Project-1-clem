@@ -182,6 +182,7 @@ async def register_user(data):
 
     hashed_pw = await _hash_password(user["password"])
     user["password"] = hashed_pw
+    user["username"] = user["username"].lower()
     try:
         id = await db.execute(
             """
@@ -351,7 +352,7 @@ async def get_game_state(game_id):
                 }, 200
         return response, 200
     else:
-        abort(404, "Game with that id does not exist.")
+        abort(404, "No game history found for given game id.")
 
 
 # --------------------- make a guess / update game state --------------------- #
