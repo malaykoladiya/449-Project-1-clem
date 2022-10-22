@@ -22,7 +22,7 @@ To initialize the sqlite database, navigate to the project directory using a ter
 - To create a game: `http POST localhost:5000/games/create username={username}`
 - To make a guess: `http POST localhost:5000/games/{gameid} guess={guess}`  
 
-Furthermore, you can view these endpoint in Quart Schema Documentation form when the server is running by navigating to `localhost:5000/docs`
+Furthermore, you can view these endpoints in Quart Schema Documentation form when the server is running by navigating to `localhost:5000/docs` in a web browser!
 
  # Features:
  Creating a RESTful API that perform the following functionalities:
