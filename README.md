@@ -17,10 +17,14 @@ The implementation of API is done in Python using the Quart framework and some a
 To initialize the sqlite database, navigate to the project directory using a terminal and then type in `./bin/init.sh` or `sh ./bin/init.sh` and then create a locally hosted server by using `foreman start`
 
 # How to use endpoints
+  HTTP verbs | endpoints | Action 
+
 - To register a new user: `http POST localhost:5000/auth/register username={user} password={pass}`
 - To sign in: `http -a {username}:{password} localhost:5000/auth/signin`
 - To create a game: `http POST localhost:5000/games/create username={username}`
 - To make a guess: `http POST localhost:5000/games/{gameid} guess={guess}`  
+- To list in-progress games : `http GET localhost:5000/users/{username}`
+- To retrieve game state : `http GET localhost:5000/games/{gameid}`
 
 Furthermore, you can view these endpoints in Quart Schema Documentation form when the server is running by navigating to `localhost:5000/docs` in a web browser!
 
@@ -40,5 +44,51 @@ The var folder holds wordle.db which contains the following tables:
 - games
 - game_states
 - valid_words
+# Functionality
+ User Registration:
+ * User will have unique username and password
+ * password is hashed with pbkdf2 and stored
+ * if username is unique, return success or else failure
+
+ Sign in:
+ * Api will check username, password and request.auth object
+ * Returns 200 {"authenticated":true} if authenticated or else 401{"error": "Unauthorized: Incorrect password."}
+
+ Create Game:
+ * Used to start a new game with a random guess by user
+ * If username is correct returns:
+ {
+    "completed": false,
+    "correct": "?????",
+    "gameid": ,
+    "guesses": 6,
+    "incorrect": "?????"
+}
+List in progress games:
+* Displays in progress games for a particular user(whose number of guess remaining is not 0)
+* If user has pending games return 200 {{
+        "gameid": gameid,
+        "username": "username"
+    }
+* If user has no games pending return 404 {
+    "error": "Not Found: No games in progress for that user."
+}
+
+Retrieve game state:
+* Show the current state of game for a given gameid
+* If game is finished then guesses field is 0 or else 0> guesses <=6
+* Returns 200 and 
+    "completed": false,
+    "correct": "?????",
+    "gameid": gameid,
+    "guesses": 6,
+    "incorrect": "?????"
+}
+
+
+
+
+
+
  
 
