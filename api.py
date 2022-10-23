@@ -359,7 +359,6 @@ async def get_game_state(game_id):
 @app.route("/games/<int:game_id>", methods=["POST"])
 @tag(["games"])
 @validate_request(Guess)
-@validate_response(GameState, 200)
 @validate_response(Error, 400)
 async def check_guess(data, game_id):
     """Make a guess for a game with a given game_id. Returns updated game state."""
@@ -371,6 +370,20 @@ async def check_guess(data, game_id):
         abort(400, "Guess must be 5 letters long.")
 
     db = await _get_db()
+
+    # perform lookup in db table "game_states" to check if game is in progress
+    status = await db.fetch_val(
+        "SELECT game_states.status FROM game_states WHERE game_states.game_id = :game_id",
+        values={"game_id": game_id},
+    )
+
+    # if finished, then return number of guesses and game status
+    if status != "In Progress":
+        guesses = await db.fetch_val(
+        "SELECT game_states.remaining_guesses FROM game_states WHERE game_states.game_id = :game_id",
+        values={"game_id": game_id},
+        )
+        return {"remaining_guesses" : guesses, "status": status}
 
     # perform lookup in db table "valid_words" to check if guess is valid
     valid_word = await db.fetch_val(
