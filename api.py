@@ -5,6 +5,7 @@ import json
 import toml
 import hashlib
 import secrets
+import logging
 
 from quart import Quart, g, request, abort, make_response
 from quart_schema import (
@@ -50,7 +51,7 @@ class CreateGame:
 
 @dataclasses.dataclass
 class CreatedGame:
-    game_id: int
+    game_id: str
     remaining_guesses: int = 6
     status: str = "In Progress"
 
@@ -59,7 +60,7 @@ class CreatedGame:
 class GameState:
     """The state of the game including information about last guess."""
 
-    game_id: int
+    game_id: str
     guess: str
     correct_spots: str = "hel??"
     incorrect_spots: str = "?or??"
@@ -86,11 +87,16 @@ async def _hash_password(password: str, salt: str = None):
 
 
 async def _get_db():
-    db = getattr(g, "_database", None)
-    if db is None:
-        db = g._database = databases.Database(app.config["DATABASES"]["URL"])
+    db_user = getattr(g, "_database", None)
+    if db_user is None:
+        db_user = g._database = databases.Database(app.config["DATABASES"]["URL1"])
         await db.connect()
-    return db
+    return db_user
+    db_game = getattr(g, "_database", None)
+    if db_game is None:
+        db_game = g._database = databases.Database(app.config["DATABASES"]["URL2"])
+        await db.connect()
+    return db_game
 
 
 async def _get_random_word():
@@ -174,7 +180,7 @@ async def username_exists(e):
 @validate_response(Error, 409)
 async def register_user(data):
     """Register a new user with a username and password."""
-    db = await _get_db()
+    db_user = await _get_db()
     user = dataclasses.asdict(data)
 
     if not user["username"] or not user["password"]:
@@ -184,7 +190,7 @@ async def register_user(data):
     user["password"] = hashed_pw
     user["username"] = user["username"].lower()
     try:
-        id = await db.execute(
+        id = await db_user.execute(
             """
             INSERT INTO users(username, password)
             VALUES(:username, :password)
@@ -220,16 +226,20 @@ async def signin():
     if not auth.username or not auth.password:
         abort(400, "Username and password are required.")
 
-    db = await _get_db()
+    db_user = await _get_db()
 
     # fetch the row for the entered username
-    user_row = await db.fetch_one(
+    user_row = await db_user.fetch_one(
         """
         SELECT *
         FROM users
         WHERE username = :username
         """,
         {"username": auth.username},
+    )
+    ## logging
+    app.logger.info(
+        "SELECT * FROM users WHERE username = :username",
     )
 
     # if the username doesn't exist, return unauthorized
@@ -260,17 +270,21 @@ async def create_game(data):
     game = dataclasses.asdict(data)
     game["secret_word"] = await _get_random_word()
 
-    db = await _get_db()
+    db_game = await _get_db()
 
-    username = await db.fetch_one(
+    username = await db_game.fetch_one(
         "SELECT * from users WHERE username = :username",
         values={"username": game["username"]},
+    )
+    ## logging
+    app.logger.info(
+        "SELECT * from users WHERE username = :username",
     )
 
     if username:
         # create new row in game
         try:
-            id = await db.execute(
+            id = await db_game.execute(
                 """
                 INSERT INTO games(secret_word, username)
                 VALUES(:secret_word, :username)
@@ -289,7 +303,7 @@ async def create_game(data):
         }
         # create new row in game_states
         try:
-            id = await db.execute(
+            id = await db_game.execute(
                 """
                 INSERT INTO game_states(game_id, remaining_guesses, status)
                 VALUES(:game_id, :remaining_guesses, :status)
@@ -311,13 +325,13 @@ async def create_game(data):
 @validate_response(Error, 404)
 async def get_game_state(game_id):
     """Retrieve the history of a game or the result if it is over."""
-    db = await _get_db()
+    db_game = await _get_db()
 
     # we need all rows in game_history for the game_id
     # join with game_states and games to get secret_word, status, and remaining_guesses
     # [0] = game_id, [1] = guess, [2] = secret_word, [3] = status,
     # [4] = remaining_guesses in guess for history, [5] = remaining guesses in game_states
-    game_states = await db.fetch_all(
+    game_states = await db_game.fetch_all(
         """
         SELECT
             game_states.game_id, game_history.guess, games.secret_word,
@@ -330,7 +344,11 @@ async def get_game_state(game_id):
         """,
         values={"game_id": game_id},
     )
-
+    ## logging
+    app.logger.info(
+        "SELECT game_states.game_id, game_history.guess, games.secret_word, game_states.status, game_history.remaining_guesses, game_states.remaining_guesses FROM game_states INNER JOIN game_history ON game_states.game_id = game_history.game_id INNER JOIN games ON game_states.game_id = games.game_id WHERE game_states.game_id = :game_id",
+    )
+    
     if game_states:
         response = []
         for state in game_states:
@@ -369,26 +387,40 @@ async def check_guess(data, game_id):
     if len(guess) != 5:
         abort(400, "Guess must be 5 letters long.")
 
-    db = await _get_db()
+    db_game = await _get_db()
 
     # perform lookup in db table "game_states" to check if game is in progress
-    status = await db.fetch_val(
+    status = await db_game.fetch_val(
         "SELECT game_states.status FROM game_states WHERE game_states.game_id = :game_id",
         values={"game_id": game_id},
+    )
+    ## logging
+    app.logger.info(
+    "SELECT game_states.status FROM game_states WHERE game_states.game_id = :game_id",
     )
 
     # if finished, then return number of guesses and game status
     if status != "In Progress":
-        guesses = await db.fetch_val(
+        guesses = await db_game.fetch_val(
         "SELECT game_states.remaining_guesses FROM game_states WHERE game_states.game_id = :game_id",
         values={"game_id": game_id},
         )
+        ## logging
+        app.logger.info(
+        "SELECT game_states.remaining_guesses FROM game_states WHERE game_states.game_id = :game_id",
+        )
+        
         return {"remaining_guesses" : guesses, "status": status}
 
     # perform lookup in db table "valid_words" to check if guess is valid
-    valid_word = await db.fetch_val(
+    valid_word = await db_game.fetch_val(
         "SELECT EXISTS(SELECT 1 FROM valid_words WHERE word = :word)",
         values={"word": guess},
+    )
+    
+    ## logging
+    app.logger.info(
+        "SELECT EXISTS(SELECT 1 FROM valid_words WHERE word = :word)",
     )
 
     # 0 if not in table, 1 if in table
@@ -396,13 +428,17 @@ async def check_guess(data, game_id):
         abort(400, "Guess is not a valid word.")
 
     # fetch a tuple of (secret_word, remaining_guesses) from db
-    info = await db.fetch_one(
+    info = await db_game.fetch_one(
         """
         SELECT secret_word, remaining_guesses
         FROM games INNER JOIN game_states ON games.game_id = game_states.game_id
         WHERE games.game_id = :game_id
         """,
         {"game_id": game_id},
+    )
+    ## logging
+    app.logger.info(
+        "SELECT secret_word, remaining_guesses FROM games INNER JOIN game_states ON games.game_id = game_states.game_id WHERE games.game_id = :game_id",
     )
 
     if not info:
@@ -422,7 +458,7 @@ async def check_guess(data, game_id):
         }
 
         # insert into game_history
-        await db.execute(
+        await db_game.execute(
             """
             INSERT INTO game_history(game_id, guess, remaining_guesses)
             VALUES(:game_id, :guess, :remaining_guesses)
@@ -442,7 +478,7 @@ async def check_guess(data, game_id):
                 game_info["status"] = "lost"
 
         # update the game_states table
-        await db.execute(
+        await db_game.execute(
             """
             UPDATE game_states
             SET status = :status, remaining_guesses = :remaining_guesses
@@ -465,8 +501,8 @@ async def check_guess(data, game_id):
 @app.route("/users/<string:username>", methods=["GET"])
 async def get_progress_game(username):
     """Retrieve the list of games in progress for a user with a given username."""
-    db = await _get_db()
-    progress_game = await db.fetch_all(
+    db_game = await _get_db()
+    progress_game = await db_game.fetch_all(
         """
         SELECT games.game_id, username, remaining_guesses
         FROM games LEFT JOIN game_states ON games.game_id = game_states.game_id 
@@ -474,6 +510,12 @@ async def get_progress_game(username):
         """,
         values={"username": username},
     )
+    
+    ## logging
+    app.logger.info(
+        "SELECT games.game_id, username, remaining_guesses FROM games LEFT JOIN game_states ON games.game_id = game_states.game_id WHERE username = :username AND game_states.status = 'In Progress'",
+    )
+        
     print("Progress of game1:", progress_game)
     if progress_game:
         print("Progress of game:", progress_game)
