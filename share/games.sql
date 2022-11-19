@@ -5,20 +5,15 @@ DROP TABLE IF EXISTS valid_words;
 DROP TABLE IF EXISTS game_history;
 DROP TABLE IF EXISTS game_states;
 DROP TABLE IF EXISTS games;
-DROP TABLE IF EXISTS users;
 
-CREATE TABLE users (
-    username TEXT NOT NULL,
-    password TEXT NOT NULL,
-    PRIMARY KEY(username)
-);
+
+
 
 CREATE TABLE games (
-    game_id INTEGER NOT NULL,
+    game_id TEXT NOT NULL,
     secret_word TEXT NOT NULL,
     username TEXT NOT NULL,
-    PRIMARY KEY(game_id),
-    FOREIGN KEY(username) REFERENCES users(username)
+    PRIMARY KEY(game_id)
 );
 
 CREATE TABLE game_states (
@@ -41,8 +36,6 @@ CREATE TABLE valid_words (
     PRIMARY KEY(word)
 );
 
--- username: john, password: doe
-INSERT INTO users VALUES ("john", "ecba7dc9b7edd8b83280c73677b2f63f$066614f195cf25cdea24d79771249f923044c9067bd9e0e84a3aa5824b39fb07");
 
 INSERT INTO games VALUES (1, "cigar", "john");
 INSERT INTO game_states VALUES (1, 2, "In Progress");
