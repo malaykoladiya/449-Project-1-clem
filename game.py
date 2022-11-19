@@ -382,6 +382,7 @@ async def check_guess(data, game_id):
 
 # -----------------------------------Listing in progress games------------------------#
 @app.route("/users/<string:username>", methods=["GET"])
+@tag(["games"])
 async def get_progress_game(username):
     """Retrieve the list of games in progress for a user with a given username."""
     db_game = await _get_db_game()
