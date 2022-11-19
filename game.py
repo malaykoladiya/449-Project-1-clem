@@ -1,11 +1,9 @@
 import databases
+import uuid
 import dataclasses
 import sqlite3
 import json
 import toml
-import hashlib
-import secrets
-import logging
 
 from quart import Quart, g, request, abort, make_response
 from quart_schema import (
@@ -152,6 +150,8 @@ async def create_game(data):
     """Create a new game for a user with a random word."""
     game = dataclasses.asdict(data)
     game["secret_word"] = await _get_random_word()
+    
+    game["game_id"] = str(uuid.uuid4())
 
     db_game = await _get_db_game()
    
@@ -167,7 +167,7 @@ async def create_game(data):
     if username:
         # create new row in game
         try:
-            id = await db_game.execute(
+            await db_game.execute(
                 """
                 INSERT INTO games(secret_word, username)
                 VALUES(:secret_word, :username)
@@ -382,7 +382,6 @@ async def check_guess(data, game_id):
 
 # -----------------------------------Listing in progress games------------------------#
 @app.route("/users/<string:username>", methods=["GET"])
-@tag(["games"])
 async def get_progress_game(username):
     """Retrieve the list of games in progress for a user with a given username."""
     db_game = await _get_db_game()
