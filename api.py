@@ -86,16 +86,18 @@ async def _hash_password(password: str, salt: str = None):
     return f"{salt}${pw_hash}"
 
 
-async def _get_db():
+async def _get_db_user():
     db_user = getattr(g, "_database", None)
     if db_user is None:
         db_user = g._database = databases.Database(app.config["DATABASES"]["URL1"])
-        await db.connect()
+        await db_user.connect()
     return db_user
+
+async def _get_db_game():    
     db_game = getattr(g, "_database", None)
     if db_game is None:
         db_game = g._database = databases.Database(app.config["DATABASES"]["URL2"])
-        await db.connect()
+        await db_game.connect()
     return db_game
 
 
@@ -180,7 +182,8 @@ async def username_exists(e):
 @validate_response(Error, 409)
 async def register_user(data):
     """Register a new user with a username and password."""
-    db_user = await _get_db()
+    db_user = await _get_db_user()
+    
     user = dataclasses.asdict(data)
 
     if not user["username"] or not user["password"]:
@@ -197,6 +200,7 @@ async def register_user(data):
             """,
             user,
         )
+        
     except sqlite3.IntegrityError as e:
         abort(409, e)
 
@@ -226,7 +230,7 @@ async def signin():
     if not auth.username or not auth.password:
         abort(400, "Username and password are required.")
 
-    db_user = await _get_db()
+    db_user = await _get_db_user()
 
     # fetch the row for the entered username
     user_row = await db_user.fetch_one(
@@ -270,15 +274,15 @@ async def create_game(data):
     game = dataclasses.asdict(data)
     game["secret_word"] = await _get_random_word()
 
-    db_game = await _get_db()
-
+    db_game = await _get_db_game()
+   
     username = await db_game.fetch_one(
-        "SELECT * from users WHERE username = :username",
+        "SELECT * from games WHERE username = :username",
         values={"username": game["username"]},
     )
     ## logging
     app.logger.info(
-        "SELECT * from users WHERE username = :username",
+        "SELECT * from games WHERE username = :username",
     )
 
     if username:
@@ -325,7 +329,7 @@ async def create_game(data):
 @validate_response(Error, 404)
 async def get_game_state(game_id):
     """Retrieve the history of a game or the result if it is over."""
-    db_game = await _get_db()
+    db_game = await _get_db_game()
 
     # we need all rows in game_history for the game_id
     # join with game_states and games to get secret_word, status, and remaining_guesses
@@ -387,7 +391,7 @@ async def check_guess(data, game_id):
     if len(guess) != 5:
         abort(400, "Guess must be 5 letters long.")
 
-    db_game = await _get_db()
+    db_game = await _get_db_game()
 
     # perform lookup in db table "game_states" to check if game is in progress
     status = await db_game.fetch_val(
@@ -501,7 +505,7 @@ async def check_guess(data, game_id):
 @app.route("/users/<string:username>", methods=["GET"])
 async def get_progress_game(username):
     """Retrieve the list of games in progress for a user with a given username."""
-    db_game = await _get_db()
+    db_game = await _get_db_game()
     progress_game = await db_game.fetch_all(
         """
         SELECT games.game_id, username, remaining_guesses
