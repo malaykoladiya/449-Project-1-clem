@@ -150,7 +150,6 @@ async def create_game(data):
     """Create a new game for a user with a random word."""
     game = dataclasses.asdict(data)
     game["secret_word"] = await _get_random_word()
-    
     game["game_id"] = str(uuid.uuid4())
 
     db_game = await _get_db_game()
@@ -169,15 +168,14 @@ async def create_game(data):
         try:
             await db_game.execute(
                 """
-                INSERT INTO games(secret_word, username)
-                VALUES(:secret_word, :username)
+                INSERT INTO games(game_id,secret_word, username)
+                VALUES(:game_id, :secret_word, :username)
                 """,
                 game,
             )
         except sqlite3.IntegrityError as e:
             abort(409, e)
 
-        game["game_id"] = id
 
         game_state = {
             "game_id": game["game_id"],
@@ -203,7 +201,7 @@ async def create_game(data):
 
 
 # ---------------------------- retrieve game state --------------------------- #
-@app.route("/games/<int:game_id>", methods=["GET"])
+@app.route("/games/<string:game_id>", methods=["GET"])
 @tag(["games"])
 @validate_response(Error, 404)
 async def get_game_state(game_id):
@@ -257,7 +255,7 @@ async def get_game_state(game_id):
 
 
 # --------------------- make a guess / update game state --------------------- #
-@app.route("/games/<int:game_id>", methods=["POST"])
+@app.route("/games/<string:game_id>", methods=["POST"])
 @tag(["games"])
 @validate_request(Guess)
 @validate_response(Error, 400)
