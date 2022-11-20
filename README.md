@@ -1,10 +1,10 @@
 # 449-Project-1
 
 # Team members:
-1. Ashley Thorlin
-2. Clemente Solorio
-3. Eddie Poulson Valdez 
-4. Shreya Bhattacharya
+1. Malay Koladiya
+2. Michael Morikawa
+3. Alan Guan 
+
 
 ## Documentation
 Procfile and .env from https://github.com/ProfAvery/cpsc449/tree/master/quart/hello
@@ -39,11 +39,14 @@ Furthermore, you can view these endpoints in Quart Schema Documentation form whe
  - Listing in-progress games
 
 # Database:
-The var folder holds wordle.db which contains the following tables:
-- users
+The var folder holds games.db which contains the following tables:
+- game_history
 - games
 - game_states
 - valid_words
+
+The var folder holds users.db which contains the following tables:
+- users
 
 # Functionality
  User Registration:
