@@ -3,8 +3,9 @@
 # Team members:
 1. Michael Morikawa
 2. Malay Narendrakumar Koladiya
-## Documentation
-Procfile and .env derrived from https://github.com/ProfAvery/cpsc449/tree/master/quart/hello
+## References
+- Procfile and .env derrived from https://github.com/ProfAvery/cpsc449/tree/master/quart/hello
+- Original project 1 base forked from https://github.com/ashleythorlin/449-Project-1
 
 # How to initialize
 1. To initialize the sqlite database, navigate to the project directory using a terminal
