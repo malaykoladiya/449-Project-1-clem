@@ -245,8 +245,7 @@ async def get_game_state(game_id):
 async def check_guess(data, game_id):
     """Make a guess for a game with a given game_id. Returns updated game state."""
 
-    guess = await request.get_json()
-    guess = guess["guess"]
+    guess = data.guess
 
     if len(guess) != 5:
         abort(400, "Guess must be 5 letters long.")
