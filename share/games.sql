@@ -16,6 +16,8 @@ CREATE TABLE games (
     PRIMARY KEY(game_id)
 );
 
+CREATE INDEX games_idx2  ON games(username);
+
 CREATE TABLE game_states (
     game_id TEXT NOT NULL,
     remaining_guesses TINYINT NOT NULL,
@@ -23,12 +25,16 @@ CREATE TABLE game_states (
     FOREIGN KEY (game_id) REFERENCES games(game_id)
 );
 
+CREATE INDEX game_states_idx1 ON game_states(game_id);
+
 CREATE TABLE game_history (
     game_id TEXT NOT NULL,
     guess TEXT NOT NULL,
     remaining_guesses TINYINT NOT NULL,
     FOREIGN KEY (game_id) REFERENCES games(game_id)
 );
+
+CREATE INDEX game_history_idx1 ON game_history(game_id);
 
 CREATE TABLE valid_words (
     word TEXT NOT NULL,
