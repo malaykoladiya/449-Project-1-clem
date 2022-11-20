@@ -1,11 +1,9 @@
 import databases
 import dataclasses
 import sqlite3
-import json
 import toml
 import hashlib
 import secrets
-import logging
 
 from quart import Quart, g, request, abort, make_response
 from quart_schema import (
@@ -14,8 +12,6 @@ from quart_schema import (
     QuartSchema,
     validate_response,
 )
-from random import randint
-from typing import Tuple
 
 app = Quart(__name__)
 QuartSchema(app)
