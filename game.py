@@ -32,11 +32,6 @@ class Guess:
 
 
 @dataclasses.dataclass
-class CreateGame:
-    username: str
-
-
-@dataclasses.dataclass
 class CreatedGame:
     game_id: str
     remaining_guesses: int = 6
@@ -59,7 +54,7 @@ class GameState:
 # ---------------------------------------------------------------------------- #
 
 
-async def _get_db_game():    
+async def _get_db_game():
     db_game = getattr(g, "_database", None)
     if db_game is None:
         db_game = g._database = databases.Database(app.config["DATABASES"]["URL2"])
@@ -141,63 +136,51 @@ async def username_exists(e):
 
 
 # -------------------------------- create game ------------------------------- #
-@app.route("/games/create", methods=["POST"])
+@app.route("/games", methods=["POST"])
 @tag(["games"])
-@validate_request(CreateGame)
 @validate_response(CreatedGame, 201)
 @validate_response(Error, 400)
-async def create_game(data):
+async def create_game():
     """Create a new game for a user with a random word."""
-    game = dataclasses.asdict(data)
+    game = dict()
     game["secret_word"] = await _get_random_word()
     game["game_id"] = str(uuid.uuid4())
+    game["username"] = request.authorization.username
+    
 
     db_game = await _get_db_game()
-   
-    username = await db_game.fetch_one(
-        "SELECT * from games WHERE username = :username",
-        values={"username": game["username"]},
-    )
-    ## logging
-    app.logger.info(
-        "SELECT * from games WHERE username = :username",
-    )
-
-    if username:
-        # create new row in game
-        try:
-            await db_game.execute(
-                """
-                INSERT INTO games(game_id,secret_word, username)
-                VALUES(:game_id, :secret_word, :username)
-                """,
-                game,
-            )
-        except sqlite3.IntegrityError as e:
-            abort(409, e)
 
 
-        game_state = {
-            "game_id": game["game_id"],
-            "remaining_guesses": 6,
-            "status": "In Progress",
-        }
-        # create new row in game_states
-        try:
-            id = await db_game.execute(
-                """
-                INSERT INTO game_states(game_id, remaining_guesses, status)
-                VALUES(:game_id, :remaining_guesses, :status)
-                """,
-                game_state,
-            )
-        except sqlite3.IntegrityError as e:
-            abort(409, e)
+    try:
+        await db_game.execute(
+            """
+            INSERT INTO games(game_id,secret_word, username)
+            VALUES(:game_id, :secret_word, :username)
+            """,
+            game,
+        )
+    except sqlite3.IntegrityError as e:
+        abort(409, e)
 
-        return game_state, 201, {"Location": f"/games/{game['game_id']}"}
+    game_state = {
+        "game_id": game["game_id"],
+        "remaining_guesses": 6,
+        "status": "In Progress",
+    }
 
-    else:
-        abort(404, "Username does not exist.")
+    # create new row in game_states
+    try:
+        await db_game.execute(
+            """
+            INSERT INTO game_states(game_id, remaining_guesses, status)
+            VALUES(:game_id, :remaining_guesses, :status)
+            """,
+            game_state,
+        )
+    except sqlite3.IntegrityError as e:
+        abort(409, e)
+
+    return game_state, 201, {"Location": f"/games/{game['game_id']}"}
 
 
 # ---------------------------- retrieve game state --------------------------- #
@@ -229,7 +212,7 @@ async def get_game_state(game_id):
     app.logger.info(
         "SELECT game_states.game_id, game_history.guess, games.secret_word, game_states.status, game_history.remaining_guesses, game_states.remaining_guesses FROM game_states INNER JOIN game_history ON game_states.game_id = game_history.game_id INNER JOIN games ON game_states.game_id = games.game_id WHERE game_states.game_id = :game_id",
     )
-    
+
     if game_states:
         response = []
         for state in game_states:
@@ -277,28 +260,28 @@ async def check_guess(data, game_id):
     )
     ## logging
     app.logger.info(
-    "SELECT game_states.status FROM game_states WHERE game_states.game_id = :game_id",
+        "SELECT game_states.status FROM game_states WHERE game_states.game_id = :game_id",
     )
 
     # if finished, then return number of guesses and game status
     if status != "In Progress":
         guesses = await db_game.fetch_val(
-        "SELECT game_states.remaining_guesses FROM game_states WHERE game_states.game_id = :game_id",
-        values={"game_id": game_id},
+            "SELECT game_states.remaining_guesses FROM game_states WHERE game_states.game_id = :game_id",
+            values={"game_id": game_id},
         )
         ## logging
         app.logger.info(
-        "SELECT game_states.remaining_guesses FROM game_states WHERE game_states.game_id = :game_id",
+            "SELECT game_states.remaining_guesses FROM game_states WHERE game_states.game_id = :game_id",
         )
-        
-        return {"remaining_guesses" : guesses, "status": status}
+
+        return {"remaining_guesses": guesses, "status": status}
 
     # perform lookup in db table "valid_words" to check if guess is valid
     valid_word = await db_game.fetch_val(
         "SELECT EXISTS(SELECT 1 FROM valid_words WHERE word = :word)",
         values={"word": guess},
     )
-    
+
     ## logging
     app.logger.info(
         "SELECT EXISTS(SELECT 1 FROM valid_words WHERE word = :word)",
@@ -379,9 +362,10 @@ async def check_guess(data, game_id):
 
 
 # -----------------------------------Listing in progress games------------------------#
-@app.route("/users/<string:username>", methods=["GET"])
-async def get_progress_game(username):
+@app.route("/games", methods=["GET"])
+async def get_progress_game():
     """Retrieve the list of games in progress for a user with a given username."""
+    username = request.authorization.username
     db_game = await _get_db_game()
     progress_game = await db_game.fetch_all(
         """
@@ -391,12 +375,12 @@ async def get_progress_game(username):
         """,
         values={"username": username},
     )
-    
-    ## logging
+
+    # logging
     app.logger.info(
         "SELECT games.game_id, username, remaining_guesses FROM games LEFT JOIN game_states ON games.game_id = game_states.game_id WHERE username = :username AND game_states.status = 'In Progress'",
     )
-        
+
     print("Progress of game1:", progress_game)
     if progress_game:
         print("Progress of game:", progress_game)

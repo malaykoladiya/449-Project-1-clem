@@ -129,3 +129,6 @@ dmypy.json
 
 # Database binaries
 *.db
+
+# vscode settings
+*.vscode

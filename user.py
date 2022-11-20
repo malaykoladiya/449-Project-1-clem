@@ -98,8 +98,8 @@ async def username_exists(e):
 # ---------------------------------------------------------------------------- #
 
 # --------------------------------- register --------------------------------- #
-@app.route("/auth/register", methods=["POST"])
-@tag(["auth"])
+@app.route("/users/register", methods=["POST"])
+@tag(["user"])
 @validate_request(User)
 @validate_response(User, 201)
 @validate_response(Error, 400)
@@ -115,7 +115,6 @@ async def register_user(data):
 
     hashed_pw = await _hash_password(user["password"])
     user["password"] = hashed_pw
-    user["username"] = user["username"].lower()
     try:
         id = await db_user.execute(
             """
@@ -128,13 +127,13 @@ async def register_user(data):
     except sqlite3.IntegrityError as e:
         abort(409, e)
 
-    # TODO: possibly change location to /games/<username>
+
     return user, 201, {"Location": f"/users/{user['username']}"}
 
 
 # ---------------------------------- sign in --------------------------------- #
-@app.route("/auth/signin")
-@tag(["auth"])
+@app.route("/users/signin")
+@tag(["user"])
 @validate_response(AuthorizedUser, 200)
 @validate_response(Error, 400)
 @validate_response(Error, 401)
@@ -148,11 +147,11 @@ async def signin():
 
     # return bad request if invalid auth header
     if not auth:
-        abort(400, "Authorization header is required.")
+        abort(401, "Authorization header is required.")
 
     # check both username and password are present
     if not auth.username or not auth.password:
-        abort(400, "Username and password are required.")
+        abort(401, "Username and password are required.")
 
     db_user = await _get_db_user()
 
