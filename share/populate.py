@@ -24,7 +24,7 @@ def insert_valid_words(cursor: sqlite3.Cursor) -> int:
 
 
 if __name__ == "__main__":
-    connection = sqlite3.connect("./var/games.db")
+    connection = sqlite3.connect("./var/primary/mount/games.db")
     cursor = connection.cursor()
 
     count = insert_valid_words(cursor)

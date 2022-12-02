@@ -1,4 +1,4 @@
-upstream backend{server localhost:5100; server localhost:5101; server localhost:5102;}
+upstream backend{server localhost:5100; server localhost:5200; server localhost:5300;}
 
 
 server {
