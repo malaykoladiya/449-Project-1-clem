@@ -1,0 +1,10 @@
+mount-dir: "/home/student/CPSC-449-Project3/wordle-read-replication-and-leaderboard-449-P3/var/tertiary/mount"
+data-dir: "/home/student/CPSC-449-Project3/wordle-read-replication-and-leaderboard-449-P3/var/tertiary/data"
+
+http:
+  addr: ":5300"
+
+static:
+  primary: false
+  hostname: "tuffix-vm"
+  advertise-url: "http://tuffix-vm:5100"
