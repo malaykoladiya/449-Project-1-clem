@@ -1,7 +1,6 @@
 mount-dir: "../wordle-read-replication-and-leaderboard-449-P3/var/primary/mount"
 data-dir: "../wordle-read-replication-and-leaderboard-449-P3/var/primary/data"
 
-exec: "hypercorn game --reload --debug --bind game.local.gd:$PORT --access-logfile - --error-logfile - --log-level DEBUG"
 
 static:
   primary: true

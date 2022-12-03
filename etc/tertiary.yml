@@ -2,8 +2,7 @@ mount-dir: "../wordle-read-replication-and-leaderboard-449-P3/var/tertiary/mount
 data-dir: "../wordle-read-replication-and-leaderboard-449-P3/var/tertiary/data"
 
 http:
-  addr: ":5300"
-
+  addr: ":20204"
 static:
   primary: false
   hostname: "tuffix-vm"
