@@ -1,5 +1,4 @@
 #!/bin/sh
-
 echo "Initializing database..."
 echo "Initializing game database..."
 sqlite3 ./var/primary/mount/games.db < ./share/games.sql

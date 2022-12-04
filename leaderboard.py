@@ -63,7 +63,6 @@ async def username_exists(e):
 @app.route("/leaderboard/updateScore", methods=["POST"])
 @tag(["leaderboard"])
 @validate_request(Leaderboard)
-# @validate_response(Leaderboard, 201)
 @validate_response(Error, 400)
 @validate_response(Error, 409)
 async def updateScore(data):
@@ -71,7 +70,6 @@ async def updateScore(data):
     try: 
         gameinfo = dataclasses.asdict(data)
         currentScore = r.zscore("playerrank",gameinfo['username'])
-        print("currentScore",currentScore)
         pointstoadd = 0
         if gameinfo['gameresult'] == 'won':
             pointstoadd = 7 - int(gameinfo['guessno'])
@@ -79,17 +77,12 @@ async def updateScore(data):
             pointstoadd = 0
         if currentScore:
             pointstoadd+=currentScore
-        print('gemainfo',gameinfo,pointstoadd)
-        print("initial",r.keys())
         
     
         r.hmset("players",{gameinfo['username']:pointstoadd})
         testdict = {}
         testdict[gameinfo['username']] = pointstoadd
         r.zadd(playerrank,testdict)
-        
-        print(r.keys())
-        print(r.zrange(playerrank, 0, 100, withscores=True))
     except:
         abort(500,"Internal Server Error Cant update Leaderboard,please try again by refining the input parameters")
 
@@ -99,15 +92,12 @@ async def updateScore(data):
 # ----------------------------Retrieve top 10------------------------------------
 @app.route("/leaderboard/getleaders", methods=["GET"])
 @tag(["leaderboard"])
-# @validate_request(Leaderboard)
-# @validate_response(Leaderboard, 201)
 @validate_response(Error, 400)
 @validate_response(Error, 409)
 async def getleaders():
     """retrieve the top 10 players from redis based on score"""
     try: 
         leaderlist = r.zrange(playerrank,0,9,desc=True,withscores=True)
-        print("leaderlist",leaderlist)
     except:
         abort(500,"Internal Server Error Cant update Leaderboard,please try again by refining the input parameters")
 
