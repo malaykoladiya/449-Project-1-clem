@@ -4,6 +4,7 @@ import dataclasses
 import sqlite3
 import json
 import toml
+from itertools import cycle
 
 from quart import Quart, g, request, abort, make_response
 from quart_schema import (
@@ -20,6 +21,7 @@ QuartSchema(app)
 
 app.config.from_file("./etc/wordle.toml", toml.load)
 
+it = cycle([2,0,1])
 
 @dataclasses.dataclass
 class Error:
@@ -61,12 +63,38 @@ async def _get_db_game():
         await db_game.connect()
     return db_game
 
+async def _get_replica_db_game():
+    db_game = getattr(g, "_database_replica", None)
+    if db_game is None:
+        global it
+        iter = next(it)
+        if(iter == 0):
+            db_game = databases.Database(app.config["DATABASES"]["URL2"])
+        elif(iter == 1):
+            db_game = databases.Database(app.config["DATABASES"]["URL3"])
+        else:
+            db_game = databases.Database(app.config["DATABASES"]["URL4"])
+        await db_game.connect()
+    return db_game
+
 
 async def _get_random_word():
     with open("./share/correct.json") as file:
         data = json.load(file)
         rand_index = randint(0, len(data) - 1)
         return data[rand_index]
+
+@app.teardown_appcontext
+async def close_connection(exception):
+    db = getattr(g, "_database", None)
+    if db is not None:
+        await db.disconnect()
+
+@app.teardown_appcontext
+async def close_replica_connection(exception):
+    db = getattr(g, "_database_replica", None)
+    if db is not None:
+        await db.disconnect()
 
 
 async def _check_string(guess: str, goal: str) -> Tuple[str, str]:
@@ -146,7 +174,7 @@ async def create_game():
     game["secret_word"] = await _get_random_word()
     game["game_id"] = str(uuid.uuid4())
     game["username"] = request.authorization.username
-    
+
 
     db_game = await _get_db_game()
 
@@ -189,7 +217,7 @@ async def create_game():
 @validate_response(Error, 404)
 async def get_game_state(game_id):
     """Retrieve the history of a game or the result if it is over."""
-    db_game = await _get_db_game()
+    db_game = await _get_replica_db_game()
 
     # we need all rows in game_history for the game_id
     # join with game_states and games to get secret_word, status, and remaining_guesses
@@ -199,7 +227,7 @@ async def get_game_state(game_id):
         """
         SELECT
             game_states.game_id, game_history.guess, games.secret_word,
-            game_states.status, game_history.remaining_guesses, 
+            game_states.status, game_history.remaining_guesses,
             game_states.remaining_guesses
         FROM game_states
             INNER JOIN game_history ON game_states.game_id = game_history.game_id
@@ -365,11 +393,11 @@ async def check_guess(data, game_id):
 async def get_progress_game():
     """Retrieve the list of games in progress for a user with a given username."""
     username = request.authorization.username
-    db_game = await _get_db_game()
+    db_game = await _get_replica_db_game()
     progress_game = await db_game.fetch_all(
         """
         SELECT games.game_id, username, remaining_guesses
-        FROM games LEFT JOIN game_states ON games.game_id = game_states.game_id 
+        FROM games LEFT JOIN game_states ON games.game_id = game_states.game_id
         WHERE username = :username AND game_states.status = 'In Progress'
         """,
         values={"username": username},

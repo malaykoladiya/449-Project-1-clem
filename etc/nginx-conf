@@ -1,4 +1,4 @@
-upstream backend{server localhost:5100; server localhost:5101; server localhost:5102;}
+upstream backend{server localhost:5100; server localhost:5200; server localhost:5300;}
 
 
 server {
@@ -46,4 +46,8 @@ server {
 		proxy_set_header Content-Length "";
 		proxy_set_header X-Original-URI $request_uri;
        }
+
+	   location /leaderboard/getleaders {
+        proxy_pass http://127.0.0.1:5700;
+      }
 }

@@ -1,0 +1,9 @@
+mount-dir: "../wordle-read-replication-and-leaderboard-449-P3/var/primary/mount"
+data-dir: "../wordle-read-replication-and-leaderboard-449-P3/var/primary/data"
+
+
+static:
+  primary: true
+  hostname: "tuffix-vm"
+  advertise-url: "http://tuffix-vm:20202"
+  
